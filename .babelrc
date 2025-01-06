@@ -1,0 +1,10 @@
+{
+  "presets": [
+    ["@babel/preset-env", {
+      "targets": "> 0.25%, not dead",
+      //"targets": "> 1%, not dead, not ie 11",
+      "useBuiltIns": false,
+      "modules": false
+    }]
+  ]
+}
