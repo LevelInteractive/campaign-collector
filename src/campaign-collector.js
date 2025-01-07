@@ -1,6 +1,6 @@
 export default class CampaignCollector
 {
-  #alias = 'CampaignCollector';
+  #_libraryName = 'CampaignCollector';
   #config = null;
 
   #defaults = {
@@ -23,6 +23,13 @@ export default class CampaignCollector
     fieldTargetMethod: ['name'],
     fieldDataAttribute: 'data-campaign-collector',
     filters: {},
+    jars: {
+      google: '^_ga|_gcl_',
+      linkedin: 'li_fat_id',
+      meta: '^_fb(?:c|p)',
+      microsoft: '^_uet',
+      x: '_twclid',
+    },
     namespace: 'lvl',
     parseRules: {
       organic: {
@@ -39,33 +46,23 @@ export default class CampaignCollector
         lycos: '^(?:www|search)?\.?(lycos).[a-z]{2,3}(?:\.[a-z]{2})?$'
       },
       social: {
-        linkedin: '^www\.(linkedin)\.com$',
         facebook: '^www\.(facebook)\.com$',
-        twitter: '^t\.co$',
-        instagram: '^l\.(instagram)\.com$'
+        instagram: '^l\.(instagram)\.com$',
+        linkedin: '^www\.(linkedin)\.com$',
+        x: '^t\.co|x\.com$',
       }
     },
     reportAnomalies: false,
     storageMethod: 'cookie', // anything other than 'cookie' will default to 'local'
-    storeAsBase64: false,    
+    storeAsBase64: true,    
     touchpoints: {
       last: {
         enabled: true,
-        utm: {
-          expires: [30, 'minutes'],
-        },
-        $ns: {
-          expires: [30, 'minutes'],
-        },
+        expires: [30, 'minutes'],
       },
       first: {
         enabled: true,
-        utm: {
-          expires: [400, 'days'],
-        },
-        $ns: {
-          expires: [400, 'days'],
-        },
+        expires: [400, 'days'],
       },
     },
   };
@@ -82,7 +79,7 @@ export default class CampaignCollector
       'marketing_tactic', 
       'creative_format', 
     ],
-    // This is a temp key, it gets replaced with the namespace on init
+    // This is a temp key, it gets replaced with the namespace (e.g. lvl) on init
     $ns: [
       'platform',
       'source',
@@ -102,7 +99,7 @@ export default class CampaignCollector
   };
 
   #paramsExpected = {
-    utm: ['source', 'medium'],
+    utm: ['source', 'medium', 'campaign'],
     $ns: ['platform', 'source'],
   };
 
@@ -110,7 +107,6 @@ export default class CampaignCollector
   #sessions = null;
 
   params = null;
-  session = null;
 
   /**
    * This is a factory method that returns an object with the grab and fillFormFields methods.
@@ -126,7 +122,7 @@ export default class CampaignCollector
       window[globalName] = instance;
 
     return [
-      'grab',
+      'collect',
       'fillFormFields',
     ].reduce((acc, key) => {
       acc[key] = instance[key].bind(instance);
@@ -136,14 +132,14 @@ export default class CampaignCollector
 
   constructor(config = {}) 
   {
-    console.time(this.#alias);
+    console.time(this.#_libraryName);
 
     this.url = new URL(window.location.href);
     this.#config = this.#deepMerge(this.#defaults, config);
     this.#setFieldMap();
     this.#resolveCookieDomain();
 
-    this.userAgent = navigator.userAgent;
+    //this.userAgent = navigator.userAgent;
     //this.screen = [window.screen.width, window.screen.height];
     //this.device = this.#parseUserAgent();
 
@@ -151,8 +147,23 @@ export default class CampaignCollector
     this.#setParamAllowList();
     this.#setParams(['utm', this.#config.namespace]);
 
-    this.#sessions = this.#storageGetAll();   
-    console.timeEnd(this.#alias);
+    this.#sessions = this.#storageGetAll();
+    this.#maybeUpdateSession();
+    
+    this.#bindListeners();
+
+    if (window.dataLayer) {
+      window.dataLayer.push({ 
+        event: 'lvl.campaign-collector:ready', 
+        campaign: this.collect({
+          applyFilters: true,
+          jarCookies: true,
+          without: ['globals']
+        }) 
+      });
+    }
+
+    console.timeEnd(this.#_libraryName);
   }
 
   fillFormFields(settings = {})
@@ -167,8 +178,8 @@ export default class CampaignCollector
 
     const data = {
       //_params: this.params,
-      first: this.session.first,
-      last: this.session.last,
+      first: this.#sessions.first,
+      last: this.#sessions.last,
       //cookies: this.getCookieValues(),
       //globals: this.getGlobalValues()
     };
@@ -217,10 +228,38 @@ export default class CampaignCollector
     }
 
   }
-  
-  grab()
+
+  get activeSession()
   {
-    
+    const session = this.#sessions.last;
+
+    if (! session)
+      return null;
+
+    if (session._expires_at < Date.now())
+      return null;
+
+    return this.#sessions.last;
+  }
+  
+  collect({
+    jarCookies = false,
+    applyFilters = false,
+    without = []
+  } = {})
+  {
+    const output = {};
+
+    if (! without.includes('params'))
+      output.params = this.params;
+
+    if (! without.includes('globals'))
+      output.globals = this.#collectGlobals({ applyFilters });
+
+    if (! without.includes('cookies'))
+      output.cookies = this.#collectCookies({ applyFilters, inJars: jarCookies });
+
+    return output;
   }
 
   #bindListeners()
@@ -233,7 +272,7 @@ export default class CampaignCollector
     };
 
     if (this.#config.enableSpaSupport) {
-      this.monkeyPatchHistory();
+      this.#monkeyPatchHistory();
 
       const handleSpaNavigation = (e) => {
         this.#setReferrer(true);
@@ -246,6 +285,111 @@ export default class CampaignCollector
 
     document.addEventListener('touchstart', handleBeforeSubmit);
     document.addEventListener('mousedown', handleBeforeSubmit);
+  }
+
+  #checkExpectedParams(namespace)
+  {
+    const params = this.params[namespace];
+
+    if (! Object.keys(params).length)
+      return;
+
+    const expected = this.#paramsExpected[namespace];
+
+    for (const param of expected) {
+      if (params.hasOwnProperty(param))
+        continue;
+      
+      //this.#reportAnomaly(`Missing expected parameter "${param}" in namespace "${namespace}"`);
+      return false;
+    }
+
+    return true;
+  }
+
+  #collectCookies({
+    applyFilters = false,
+    inJars = false
+  } = {})
+  {
+    let cookies = {};
+
+    if (! this.#config.fieldMap.cookies)
+      return cookies;
+    
+    for (const [cookieName, field] of Object.entries(this.#config.fieldMap.cookies)) {
+
+      let value = this.#getCookie(cookieName);
+
+      if (applyFilters && typeof this.#config.filters[cookieName] === 'function') {
+        try {
+          value = this.#config.filters[cookieName](value);
+        } catch (e) {
+          console.error(
+            `${this.#_libraryName}.js: Error applying filter to cookie "${cookieName}"`,
+            e.message
+          );
+        }
+      }
+
+      if (! value)
+        continue;
+
+      if (inJars) {
+        
+        let isStray = true;
+
+        for (const jar in this.#config.jars) {
+          if (! new RegExp(this.#config.jars[jar]).test(cookieName))
+            continue;
+            
+          cookies[jar] ??= {};
+
+          cookies[jar][cookieName] = value;
+          isStray = false;
+
+          break;
+        }
+
+        if (isStray) {
+          cookies._stray ??= {};
+          cookies._stray[cookieName] = value;
+        }
+
+      } else {
+        cookies[cookieName] = value;
+      }
+      
+    }
+    
+    return cookies;
+  }
+
+  #collectGlobals({
+    applyFilters = false
+  } = {}) 
+  {
+    let globals = {};
+    
+    for (const [path, field] of Object.entries(this.#config.fieldMap.globals)) {
+
+      try{
+        let value = this.#resolveGlobal(path);
+
+        if (applyFilters && typeof this.#config.filters[path] === 'function')
+          value = this.#config.filters[path](value);
+
+        globals[path] = value;
+      } catch(e){
+        console.error(
+          `${this.#_libraryName}.js: Error resolving global "${path}"`,
+          e.message
+        );
+      }
+      
+    }
+    
+    return globals;
   }
 
   #deepMerge(target, source) 
@@ -269,34 +413,35 @@ export default class CampaignCollector
 
   #getCookie(name)
   {
-    const value = `; ${document.cookie}`;
-    const parts = value.split(`; ${name}=`);
-    
-    if (parts.length === 2) {
-      const part = parts.pop().split(';').shift();
-      return part;
-    }
-
-    return null;
+    const match = document.cookie.match(new RegExp('(^| )' + name + '=([^;]+)'));
+    return match ? match[2].trim() : null;
   }
 
-  #convertToSeconds(value = 0, units)
+  #convertToMilliseconds({
+    value = 0,
+    units = 'minutes'
+  } = {})
   {
-    const conversions = {
+    const SECONDS_PER = {
       minutes: 60,
-      hours: 3600,     // 60 * 60
-      days: 86400,     // 60 * 60 * 24
-      weeks: 604800,   // 60 * 60 * 24 * 7
-      months: 2592000, // 60 * 60 * 24 * 30
-      years: 31536000, // 60 * 60 * 24 * 365
+      hours: 60 * 60,
+      days: 60 * 60 * 24,
+      weeks: 60 * 60 * 24 * 7,
+      months: 60 * 60 * 24 * 30,
+      years: 60 * 60 * 24 * 365,
     };
+  
+    const secondsPerUnit = SECONDS_PER[units.toLowerCase()];
 
-    return conversions[units] ? parseInt(value) * conversions[units] : 0;
+    if (! secondsPerUnit) 
+      return 0;
+  
+    return parseInt(value) * secondsPerUnit * 1000;
   }
 
   #monkeyPatchHistory() 
   {
-    console.warn(`${this.#alias}.js: config.enableSpaSupport = true monkeypatches the the history.pushState() method.`)
+    console.warn(`${this.#_libraryName}.js: config.enableSpaSupport = true monkeypatches the the history.pushState() method.`)
 
     let pushState = history.pushState;
 
@@ -314,32 +459,23 @@ export default class CampaignCollector
 
   #parseReferrer()
   {
-    const referrer = this.#referrer;
     let parsed = {};
 
     // If the referrer hostname is empty or is the on same root domain as the cookieDomain then we can only assume its direct
     // @CONSIDER: use referral exclusion config parameter if cross-site
-    if (! referrer || (referrer.hostname.indexOf(this.#config.cookieDomain) > -1)) 
+    if (! this.#referrer || (this.#referrer.hostname.indexOf(this.#config.cookieDomain) > -1)) 
       return parsed;
 
     parsed = {
-      source: referrer.hostname,
+      source: this.#referrer.hostname,
       medium: 'referral'
     };
     
-    for (let medium in this.#config.parseRules) {
+    for (const [medium, rules] of Object.entries(this.#config.parseRules)) {
       
-      if (!rules.hasOwnProperty(medium))
-        continue;
-      
-      for (let source in rules[medium]) {
-      
-        if (!rules[medium].hasOwnProperty(source))
-          continue;
-      
-        let check = referrer.hostname.match(rules[medium][source]);
-        
-        if (!check)
+      for (const [source, pattern] of Object.entries(rules)) {
+    
+        if (! this.#referrer.hostname.match(pattern))
           continue;
           
         parsed.source = source;
@@ -450,10 +586,14 @@ export default class CampaignCollector
 
   #setParamAllowList()
   {
-    let custom = this.#paramsByNamespace.$ns;
-    this.#paramsByNamespace[this.#config.namespace] = custom;
+    let allowed = this.#paramsByNamespace.$ns;
+    let expected = this.#paramsExpected.$ns;
+
+    this.#paramsByNamespace[this.#config.namespace] = allowed;
+    this.#paramsExpected[this.#config.namespace] = expected;
 
     delete this.#paramsByNamespace.$ns;
+    delete this.#paramsExpected.$ns;
   }
 
   #setParams(namespaces = []) 
@@ -516,20 +656,15 @@ export default class CampaignCollector
 
     const touchpoints = this.#config.touchpoints;
 
-    for (const touchpoint in touchpoints) {
-
-      if (! touchpoints.hasOwnProperty(touchpoint))
-        continue;
-
-      let config = touchpoints[touchpoint];
+    for (const [touchpoint, config] of Object.entries(touchpoints)) {
 
       if (! config.enabled)
         continue;
       
-      let storageKey = `${this.#config.namespace}-${touchpoint}`;
+      let storageKey = `_${this.#config.namespace}-session-${touchpoint}`;
       data[touchpoint] = this.#storageGet(storageKey);
       
-      if (data[touchpoint]?._expires >= Date.now()) {
+      if (data[touchpoint]?._expires_at < Date.now()) {
         this.#storageRemove(storageKey);
         data[touchpoint] = null;
       }
@@ -563,22 +698,91 @@ export default class CampaignCollector
     const key = `_${this.#config.namespace}-session-${touchpoint}`;
     const now = Date.now();
 
-    if (! value._timestamp)
-      value._timestamp = now;
+    if (! value._started_at)
+      value._started_at = now;
 
-    let maxAge = this.#convertToSeconds(400, 'days');
-
-    if (expires) {
-      value._expires = now + maxAge;
-      const [expires, units] = this.#config.touchpoints[touchpoint].expires;
-      maxAge = this.#convertToSeconds(expires, units);
-    }
+    const [expiresIn, units] = this.#config.touchpoints[touchpoint].expires;
+    value._expires_at = now + this.#convertToMilliseconds({
+      value: expiresIn,
+      units
+    });
 
     value = JSON.stringify(value);
 
     if (this.#config.storeAsBase64)
       value = `base64:${btoa(value)}`;
     
-    return this.#config.storageMethod === 'cookie' ? document.cookie = `${key}=${value}; max-age=${maxAge}; path=/; domain=${this.#config.cookieDomain}; secure` : localStorage.setItem(key, value);
+    return this.#config.storageMethod === 'cookie' ? document.cookie = `${key}=${value}; max-age=${value._expires_at}; path=/; domain=${this.#config.cookieDomain}; secure` : localStorage.setItem(key, value);
+  }
+
+  #maybeUpdateSession()
+  {
+    /**
+     * Heirarchy of session data:
+     * 1. Defaults to (direct)/(none) to match GA4 defaults. 
+     * 2. Referrer parsing can never overwrite an active session w/ explicit campaign data.
+     * 3. If medium = email (or loosely matches email) and an active session exists w/ explicit campaign data -- it will be ignored.
+     *    Most of the time if an active session is present, the user was explicitly told to check their email for a link (e.g. password reset or gated content delivered via email).
+     * 4. If the session is the first touch - the last touch data should be set to the current parsed data.
+     */
+
+    const $ns = this.#config.namespace;
+
+    const data = {
+      utm: {
+        source: '(direct)',
+        medium: '(none)'
+      }
+    };
+
+    data[$ns] = {};
+
+    this.#paramsByNamespace.utm.forEach((parameter) => {
+      if (['source', 'medium'].includes(parameter))
+        return;
+
+      data.utm[parameter] = null;
+    });
+
+    this.#paramsByNamespace[$ns].forEach((parameter) => {
+      data[$ns][parameter] = null;
+    });
+
+    let referrer = {};
+
+    const hasExpectedUtms = this.#checkExpectedParams('utm');
+    const hasExpectedCustom = this.#checkExpectedParams($ns);
+
+    if (! hasExpectedUtms && ! hasExpectedCustom) {
+
+      // referrer = this.#hasActiveSession() ? {} : this.#parseReferrer();
+
+    } else {
+      if (hasExpectedUtms)
+        Object.assign(data.utm, this.params.utm);
+  
+      if (hasExpectedCustom)
+        Object.assign(data[$ns], this.params[$ns]);
+    }
+
+    Object.assign(data, referrer);
+
+    if (this.#sessions.first) {
+      // If the last touch session cookie has expired - or if the current parsed session source is not direct - the last touch session 
+      // cookie should be set to the latest parsed data.
+      // Otherwise the existing last touch data will be persisted until the next non-direct source is encountered.
+      data = (! this.#sessions.last || (data.utm.source !== '(direct)')) ? data : this.#sessions.last;
+    } else {
+      // With ITP and other cookie limitations - this cookie will often be capped to 7 days.
+      // See: https://www.cookiestatus.com for latest info.
+      // @TODO: Implement 1st party endpoint for Safari ITP 2.3+ to extend the session window.
+      this.#sessions.first = data;
+      this.#storageSet('first', data);
+    }
+  
+    this.#sessions.last = data;
+
+    // The last touch cookie should always be refreshed to ensure the session window is extended like in UA. 
+    this.#storageSet('last', data);
   }
 }
