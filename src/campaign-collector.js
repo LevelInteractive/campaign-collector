@@ -53,18 +53,18 @@ export default class CampaignCollector
       }
     },
     reportAnomalies: false,
+    sessionTimeout: null,
     storageMethod: 'cookie', // anything other than 'cookie' will default to 'local'
-    storeAsBase64: true,    
-    touchpoints: {
-      last: {
-        enabled: true,
-        expires: [30, 'minutes'],
-      },
-      first: {
-        enabled: true,
-        expires: [400, 'days'],
-      },
+    storeAsBase64: true,
+  };
+
+  #touchpoints = {
+    first: {
+      expires: [2, 'years'],
     },
+    last: {
+      expires: [30, 'minutes'],
+    }
   };
 
   #paramsByNamespace = {
@@ -81,26 +81,29 @@ export default class CampaignCollector
     ],
     // This is a temp key, it gets replaced with the namespace (e.g. lvl) on init
     $ns: [
-      'platform',
-      'source',
-      'campaign',
-      'group',
-      'unit',
-      'extension',
-      'loc_interest',
-      'loc_physical',
-      'device',
-      'matchtype',
-      'placement',
-      'position',
-      'target',
-      'network',
+      'via',       // Platform
+      'src',       // Source
+      'cid',       // Campaign ID
+      'gid',       // Set/Group ID
+      'aid',       // Ad ID
+      'pid',       // Product ID
+      'fid',       // Feed Item ID
+      'art',       // Creative ID
+      'ext',       // Extension
+      'loi',       // Location (Interest)
+      'lop',       // Location (Physical)
+      'pos',       // Position
+      'tgt',       // Target
+      'net',       // Network
+      'device',    // Device
+      'matchtype', // Match Type
+      'placement', // Placement
     ],
   };
 
   #paramsExpected = {
     utm: ['source', 'medium', 'campaign'],
-    $ns: ['platform', 'source'],
+    $ns: ['via', 'cid', 'gid', 'aid'],
   };
 
   #referrer = null;
@@ -147,7 +150,10 @@ export default class CampaignCollector
     this.#setParamAllowList();
     this.#setParams(['utm', this.#config.namespace]);
 
-    this.#sessions = this.#storageGetAll();
+    if (Array.isArray(this.#config.sessionTimeout))
+      this.#touchpoints.last.expires = this.#config.sessionTimeout;
+
+    this.#sessions = this.#sessionGetAll();
     this.#maybeUpdateSession();
     
     this.#bindListeners();
@@ -172,61 +178,79 @@ export default class CampaignCollector
       settings.targetMethod = Array.isArray(settings.targetMethod) ? settings.targetMethod : [settings.targetMethod];
 
     const query = {
-      targetMethod: settings.targetMethod || this.config.fieldTargetMethod,
+      targetMethod: settings.targetMethod || this.#config.fieldTargetMethod,
       scope: settings.scope || document
     };
 
-    const data = {
-      //_params: this.params,
-      first: this.#sessions.first,
-      last: this.#sessions.last,
-      //cookies: this.getCookieValues(),
-      //globals: this.getGlobalValues()
-    };
+    const fieldMap = this.#config.fieldMap;
 
-    for (let key in this.#config.fieldMap) {
+    const data = this.collect({
+      without: ['params']
+    });
 
-      if (! this.#config.fieldMap.hasOwnProperty(key)) 
+    ['first', 'last'].forEach(touchpoint => {
+
+      if (fieldMap[touchpoint])
+        fieldMap[touchpoint] = this.#flattenObject(fieldMap[touchpoint]);
+
+      if (data[touchpoint])
+        data[touchpoint] = this.#flattenObject(data[touchpoint]);
+
+    });
+
+    for (const [group, fields] of Object.entries(fieldMap)) {
+
+      if (group === '$json') {
         continue;
-
-      for (let prop in this.#config.fieldMap[key]) {
-
-        if (! this.#config.fieldMap[key].hasOwnProperty(prop)) 
-          continue;
-
-        let fields;
-        let field = this.#config.fieldMap[key][prop];
-        let querySelector = [];
-
-        query.targetMethod.forEach((method) => {
-
-          const selectors = {
-            class: 'input.' + field,
-            parentClass: '.' + field + ' input',
-            dataAttribute: 'input[' + this.#config.fieldDataAttribute + '="' + field + '"]',
-            name: 'input[name="' + field + '"]'
-          };
-
-          querySelector.push(selectors[method] || selectors.name);
-
-        });
-
-        fields = query.scope.querySelectorAll(querySelector.join(','));
-
-        if (!fields)
-          continue;
-        
-        for (var i = 0; i < fields.length; i++) {
-          if (data[key].hasOwnProperty(prop) && data[key][prop] != '') {
-            fields[i].value = data[key][prop];
-            fields[i].dispatchEvent(new Event('input', { bubbles: true }));
-          }
-        }
-
       }
 
-    }
+      for (const [key, selector] of Object.entries(fields)) {
 
+        const inputs = query.scope.querySelectorAll(this.#getSelectorString(query.targetMethod, selector));
+
+        if (! inputs?.length) 
+          continue;
+
+        const value = data[group][key] ?? '-';
+
+        Array.from(inputs).forEach(input => {
+          input.value = value;
+          input.setAttribute('value', value);
+          input.dispatchEvent(new Event('input', { bubbles: true }));
+        });
+      }
+    }
+  }
+
+  #flattenObject(obj, prefix = '') 
+  {
+    return Object.keys(obj).reduce((acc, key) => {
+      const pre = prefix.length ? `${prefix}_` : '';
+      
+      if (typeof obj[key] === 'object' && obj[key] !== null && !Array.isArray(obj[key])) {
+        Object.assign(acc, this.#flattenObject(obj[key], `${pre}${key}`));
+      } else {
+        acc[`${pre}${key}`] = obj[key];
+      }
+      
+      return acc;
+    }, {});
+  }
+
+  #getSelectorString(methods = [], selector)
+  {
+    return methods.map(method => {
+
+      const selectorMap = {
+        class: 'input.' + selector,
+        parentClass: '.' + selector + ' input',
+        dataAttribute: 'input[' + this.#config.fieldDataAttribute + '="' + selector + '"]',
+        name: 'input[name="' + selector + '"]'
+      };
+
+      return selectorMap[method] || selectorMap.name;
+
+    }).join(',');
   }
 
   get activeSession()
@@ -236,8 +260,12 @@ export default class CampaignCollector
     if (! session)
       return null;
 
-    if (session._expires_at < Date.now())
-      return null;
+    const now = Math.ceil(Date.now() / 1000);
+
+    if (session.$exp < now) {
+      this.#sessions.last = null;
+      this.#maybeUpdateSession();
+    }
 
     return this.#sessions.last;
   }
@@ -253,6 +281,12 @@ export default class CampaignCollector
     if (! without.includes('params'))
       output.params = this.params;
 
+    if (! without.includes('first'))
+      output.first = this.#sessions.first;
+
+    if (! without.includes('last'))
+      output.last = this.#sessions.last;
+
     if (! without.includes('globals'))
       output.globals = this.#collectGlobals({ applyFilters });
 
@@ -267,8 +301,20 @@ export default class CampaignCollector
     const handleBeforeSubmit = (e) => {
       if (! e.target.matches('[type="submit"]'))
         return;
+
+      const form = e.target.closest('form');
         
-      this.fillFormFields(e.target.closest('form'));
+      this.fillFormFields(form);
+
+      let data;
+
+      form.querySelectorAll(this.#getSelectorString(this.#config.fieldTargetMethod, this.#config.fieldMap.$json)).forEach(input => {
+        data = data ?? JSON.stringify(this.collect({
+          without: ['params']
+        }));
+
+        input.value = data;
+      });
     };
 
     if (this.#config.enableSpaSupport) {
@@ -276,15 +322,19 @@ export default class CampaignCollector
 
       const handleSpaNavigation = (e) => {
         this.#setReferrer(true);
-        //this.updateSession();
+        this.#maybeUpdateSession();
       };
 
       window.addEventListener('popstate', handleSpaNavigation);
       window.onpopstate = history.onpushstate = handleSpaNavigation;
     }
 
-    document.addEventListener('touchstart', handleBeforeSubmit);
-    document.addEventListener('mousedown', handleBeforeSubmit);
+    document.addEventListener('mousedown', (e) => {
+      handleBeforeSubmit(e);
+      this.#sessionHydrate();
+    });
+
+    document.addEventListener('touchstart', handleBeforeSubmit); 
   }
 
   #checkExpectedParams(namespace)
@@ -321,6 +371,9 @@ export default class CampaignCollector
 
       let value = this.#getCookie(cookieName);
 
+      if (! value)
+        continue;
+
       if (applyFilters && typeof this.#config.filters[cookieName] === 'function') {
         try {
           value = this.#config.filters[cookieName](value);
@@ -331,9 +384,6 @@ export default class CampaignCollector
           );
         }
       }
-
-      if (! value)
-        continue;
 
       if (inJars) {
         
@@ -376,6 +426,9 @@ export default class CampaignCollector
       try{
         let value = this.#resolveGlobal(path);
 
+        if (! value)
+          continue;
+
         if (applyFilters && typeof this.#config.filters[path] === 'function')
           value = this.#config.filters[path](value);
 
@@ -417,7 +470,7 @@ export default class CampaignCollector
     return match ? match[2].trim() : null;
   }
 
-  #convertToMilliseconds({
+  #getSecondsFor({
     value = 0,
     units = 'minutes'
   } = {})
@@ -436,7 +489,7 @@ export default class CampaignCollector
     if (! secondsPerUnit) 
       return 0;
   
-    return parseInt(value) * secondsPerUnit * 1000;
+    return parseInt(value) * secondsPerUnit;
   }
 
   #monkeyPatchHistory() 
@@ -546,6 +599,32 @@ export default class CampaignCollector
     }, window);
   }
 
+  #sanitizeString(value) 
+  {
+    if (! value) 
+      return '';
+    
+    let sanitized = String(value).trim();
+    sanitized = sanitized.slice(0, 255);
+
+    // sanitized = sanitized.replace(/<[^>]*>[^<]*(<[^>]*>[^<]*)*<\/[^>]*>/g, '');
+    // sanitized = sanitized.replace(/<[^>]*>/g, '');
+
+    sanitized = sanitized.replace(/[^a-zA-Z0-9_\-%.@+~$!:=;/|\[\]\(\) ]/g, '');
+
+    const sqlPatterns = [
+      ///\b(SELECT|INSERT|UPDATE|DELETE|DROP|UNION|ALTER|CREATE|TRUNCATE)\b/gi,
+      /--|;/g,
+      /\/\*|\*\//g
+    ];
+
+    sqlPatterns.forEach(pattern => {
+      sanitized = sanitized.replace(pattern, '');
+    });
+
+    return sanitized;
+  }
+
   #setFieldMap()
   {
     const fieldMap = this.#config.fieldMap;
@@ -622,7 +701,7 @@ export default class CampaignCollector
           const newKey = key.slice(namespace.length + 1);
           
           if (this.#paramsByNamespace[namespace].includes(newKey)) {
-            data[namespace][newKey] = value;
+            data[namespace][newKey] = this.#sanitizeString(value);
             matched = true;
           }
           
@@ -631,7 +710,7 @@ export default class CampaignCollector
       }
   
       if (! matched) 
-        data[remainderKey][key] = value;
+        data[remainderKey][key] = this.#sanitizeString(value);
     }
   
     this.params = data;
@@ -650,22 +729,18 @@ export default class CampaignCollector
     this.#referrer = referrer;
   }
 
-  #storageGetAll()
+  #sessionGetAll()
   {
     let data = {};
 
-    const touchpoints = this.#config.touchpoints;
+    const now = Math.ceil(Date.now() / 1000);
 
-    for (const [touchpoint, config] of Object.entries(touchpoints)) {
+    for (const [touchpoint, config] of Object.entries(this.#touchpoints)) {
 
-      if (! config.enabled)
-        continue;
+      data[touchpoint] = this.#sessionGet(touchpoint);
       
-      let storageKey = `_${this.#config.namespace}-session-${touchpoint}`;
-      data[touchpoint] = this.#storageGet(storageKey);
-      
-      if (data[touchpoint]?._expires_at < Date.now()) {
-        this.#storageRemove(storageKey);
+      if (this.#config.storageMethod !== 'cookie' && data[touchpoint]?.$exp < now) {
+        this.#sessionEnd(touchpoint);
         data[touchpoint] = null;
       }
 
@@ -674,45 +749,82 @@ export default class CampaignCollector
     return data;
   }
 
-  #storageGet(touchpoint)
+  #storageKey(touchpoint)
   {
-    const key = `_${this.#config.namespace}-session-${touchpoint}`;
+    return `_${this.#config.namespace}_cc_${touchpoint}`;
+  }
+
+  #sessionGet(touchpoint)
+  {
+    const key = this.#storageKey(touchpoint);
     let value = this.#config.storageMethod === 'cookie' ? this.#getCookie(key) : localStorage.getItem(key);
+
+    if (! value)
+      return null;
     
-    if (value && value.startsWith('base64:'))
+    if (value.startsWith('64:'))
       value = atob(value.split(':')[1]);
+    
+    if (value.$ref)
+      return this.#sessionGet(value.$ref);
 
     value = JSON.parse(value);
+
+    if (value === 'null')
+      value = null;
 
     return value;
   }
 
-  #storageRemove(touchpoint)
+  #sessionEnd(touchpoint)
   {
-    const key = `${this.#config.namespace}-session-${touchpoint}`;
-    return this.#config.storageMethod === 'cookie' ? document.cookie = `${key}=; max-age=0; path=/; domain=${this.#config.cookieDomain}` : localStorage.removeItem(key);
+    const key = this.#storageKey(touchpoint);
+    
+    if (this.#config.storageMethod === 'cookie') {
+      document.cookie = `${key}=; max-age=0; path=/; domain=${this.#config.cookieDomain}`;
+    } else { 
+      localStorage.removeItem(key); 
+    }
   }
 
-  #storageSet(touchpoint, value)
-  {
-    const key = `_${this.#config.namespace}-session-${touchpoint}`;
-    const now = Date.now();
+  #sessionSet(touchpoint, value)
+  { 
+    const now = Math.ceil(Date.now() / 1000);
 
-    if (! value._started_at)
-      value._started_at = now;
+    if (! value.$set)
+      value.$set = now;
 
-    const [expiresIn, units] = this.#config.touchpoints[touchpoint].expires;
-    value._expires_at = now + this.#convertToMilliseconds({
+    const [expiresIn, units] = this.#touchpoints[touchpoint].expires;
+
+    const maxAge = this.#getSecondsFor({
       value: expiresIn,
       units
     });
 
+    value.$exp = maxAge + now;
+
     value = JSON.stringify(value);
 
     if (this.#config.storeAsBase64)
-      value = `base64:${btoa(value)}`;
+      value = `64:${btoa(value)}`;
     
-    return this.#config.storageMethod === 'cookie' ? document.cookie = `${key}=${value}; max-age=${value._expires_at}; path=/; domain=${this.#config.cookieDomain}; secure` : localStorage.setItem(key, value);
+    const key = this.#storageKey(touchpoint);
+
+    if (this.#config.storageMethod === 'cookie') {
+      document.cookie = `${key}=${value}; max-age=${maxAge}; path=/; domain=${this.#config.cookieDomain}; secure`;
+    } else { 
+      localStorage.setItem(key, value);
+    }
+  }
+
+  #sessionHydrate()
+  {
+    let value = this.#sessionGet('last');
+
+    if (! value)
+      return;
+
+    this.#sessionSet('last', value);
   }
 
   #maybeUpdateSession()
@@ -728,7 +840,7 @@ export default class CampaignCollector
 
     const $ns = this.#config.namespace;
 
-    const data = {
+    let data = {
       utm: {
         source: '(direct)',
         medium: '(none)'
@@ -737,52 +849,41 @@ export default class CampaignCollector
 
     data[$ns] = {};
 
-    this.#paramsByNamespace.utm.forEach((parameter) => {
-      if (['source', 'medium'].includes(parameter))
-        return;
-
-      data.utm[parameter] = null;
-    });
-
-    this.#paramsByNamespace[$ns].forEach((parameter) => {
-      data[$ns][parameter] = null;
-    });
-
-    let referrer = {};
-
     const hasExpectedUtms = this.#checkExpectedParams('utm');
     const hasExpectedCustom = this.#checkExpectedParams($ns);
 
-    if (! hasExpectedUtms && ! hasExpectedCustom) {
+    if (hasExpectedUtms)
+      Object.assign(data.utm, this.params.utm);
 
-      // referrer = this.#hasActiveSession() ? {} : this.#parseReferrer();
+    if (hasExpectedCustom)
+      Object.assign(data[$ns], this.params[$ns]);
 
-    } else {
-      if (hasExpectedUtms)
-        Object.assign(data.utm, this.params.utm);
-  
-      if (hasExpectedCustom)
-        Object.assign(data[$ns], this.params[$ns]);
-    }
+    if (! hasExpectedUtms && ! hasExpectedCustom)
+      Object.assign(data.utm, this.#parseReferrer());
 
-    Object.assign(data, referrer);
-
-    if (this.#sessions.first) {
+    if (this.#sessions?.first) {
+      console.log('first touchpoint exists');
       // If the last touch session cookie has expired - or if the current parsed session source is not direct - the last touch session 
       // cookie should be set to the latest parsed data.
       // Otherwise the existing last touch data will be persisted until the next non-direct source is encountered.
+
       data = (! this.#sessions.last || (data.utm.source !== '(direct)')) ? data : this.#sessions.last;
     } else {
+      
       // With ITP and other cookie limitations - this cookie will often be capped to 7 days.
       // See: https://www.cookiestatus.com for latest info.
       // @TODO: Implement 1st party endpoint for Safari ITP 2.3+ to extend the session window.
       this.#sessions.first = data;
-      this.#storageSet('first', data);
+      this.#sessionSet('first', data);
+
+      data = {
+        $ref: 'first',
+      };
     }
   
     this.#sessions.last = data;
 
     // The last touch cookie should always be refreshed to ensure the session window is extended like in UA. 
-    this.#storageSet('last', data);
+    this.#sessionSet('last', data);
   }
 }
