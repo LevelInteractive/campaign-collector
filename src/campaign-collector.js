@@ -23,13 +23,6 @@ export default class CampaignCollector
     fieldTargetMethod: ['name'],
     fieldDataAttribute: 'data-campaign-collector',
     filters: {},
-    // jars: {
-    //   google: '^_ga|_gcl_',
-    //   linkedin: 'li_fat_id',
-    //   meta: '^_fb(?:c|p)',
-    //   microsoft: '^_uet',
-    //   x: '_twclid',
-    // },
     namespace: 'lvl',
     parseRules: {
       organic: {
@@ -112,7 +105,7 @@ export default class CampaignCollector
   };
 
   /**
-   * This is a factory method that returns an object with the grab and fillFields methods.
+   * This is a factory method that returns an object with the grab and fill methods.
    * The only reason this exists is for compatibility with Google Tag Managers, sandboxed JS 
    * "callInWindow" method, which can only call functions that are properties of an object.
    * GTM's sandboxed JS doens't support native ES6 classes (stupid - I know).
@@ -125,8 +118,8 @@ export default class CampaignCollector
       window[globalName] = instance;
 
     return [
-      'collect',
-      'fillFields',
+      'fill',
+      'grab',
     ].reduce((acc, key) => {
       acc[key] = instance[key].bind(instance);
       return acc;
@@ -155,13 +148,13 @@ export default class CampaignCollector
 
     console.log(this.#config);
 
-    this.fillFields();
+    this.fill();
     this.#bindListeners();
 
     if (window.dataLayer) {
       window.dataLayer.push({ 
         event: 'lvl.campaign-collector:ready', 
-        campaign: this.collect({
+        campaign: this.grab({
           applyFilters: true,
           without: ['globals']
         }) 
@@ -193,33 +186,7 @@ export default class CampaignCollector
     return this.#paramAllowList;
   }
 
-  collect({
-    // jarCookies = false,
-    applyFilters = false,
-    without = []
-  } = {})
-  {
-    const output = {};
-
-    if (! without.includes('params'))
-      output.params = this.#params;
-
-    if (! without.includes('first'))
-      output.first = this.#sessions.first;
-
-    if (! without.includes('last'))
-      output.last = this.#sessions.last;
-
-    if (! without.includes('globals'))
-      output.globals = this.#collectGlobals({ applyFilters });
-
-    if (! without.includes('cookies'))
-      output.cookies = this.#collectCookies({ applyFilters });
-
-    return output;
-  }
-
-  fillFields(settings = {})
+  fill(settings = {})
   {
     if (settings.hasOwnProperty('targetMethod'))
       settings.targetMethod = Array.isArray(settings.targetMethod) ? settings.targetMethod : [settings.targetMethod];
@@ -231,7 +198,7 @@ export default class CampaignCollector
 
     const fieldMap = this.#deepCopy(this.#config.fieldMap);
 
-    const data = this.collect({
+    const data = this.grab({
       without: ['params']
     });
 
@@ -271,6 +238,31 @@ export default class CampaignCollector
     }
   }
 
+  grab({
+    applyFilters = false,
+    without = []
+  } = {})
+  {
+    const output = {};
+
+    if (! without.includes('params'))
+      output.params = this.#params;
+
+    if (! without.includes('first'))
+      output.first = this.#sessions.first;
+
+    if (! without.includes('last'))
+      output.last = this.#sessions.last;
+
+    if (! without.includes('globals'))
+      output.globals = this.#collectGlobals({ applyFilters });
+
+    if (! without.includes('cookies'))
+      output.cookies = this.#collectCookies({ applyFilters });
+
+    return output;
+  }
+
   #bindListeners()
   {
     const handleBeforeSubmit = (e) => {
@@ -279,12 +271,12 @@ export default class CampaignCollector
 
       const form = e.target.closest('form');
         
-      this.fillFields(form);
+      this.fill(form);
 
       let data;
 
       form.querySelectorAll(this.#makeSelectorString(this.#config.fieldTargetMethod, this.#config.fieldMap.$json)).forEach(input => {
-        data = data ?? JSON.stringify(this.collect({
+        data = data ?? JSON.stringify(this.grab({
           without: ['params']
         }));
 
@@ -334,7 +326,6 @@ export default class CampaignCollector
 
   #collectCookies({
     applyFilters = false,
-    // inJars = false
   } = {})
   {
     let cookies = {};
@@ -361,31 +352,6 @@ export default class CampaignCollector
       }
 
       cookies[cookieName] = value;
-
-      // if (inJars) {
-        
-      //   let isStray = true;
-
-      //   for (const jar in this.#config.jars) {
-      //     if (! new RegExp(this.#config.jars[jar]).test(cookieName))
-      //       continue;
-            
-      //     cookies[jar] ??= {};
-
-      //     cookies[jar][cookieName] = value;
-      //     isStray = false;
-
-      //     break;
-      //   }
-
-      //   if (isStray) {
-      //     cookies._stray ??= {};
-      //     cookies._stray[cookieName] = value;
-      //   }
-
-      // } else {
-      //   cookies[cookieName] = value;
-      // }
       
     }
     
@@ -872,6 +838,6 @@ export default class CampaignCollector
 
   #storageKey(touchpoint)
   {
-    return `_${this.#config.namespace}_cc_${touchpoint}`;
+    return `_lvl_cc_${touchpoint}`;
   }  
 }
