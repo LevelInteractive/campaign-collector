@@ -7,7 +7,7 @@ module.exports = {
   entry: './src/campaign-collector.js',
   output: {
     path: path.resolve(__dirname, 'dist'),
-    filename: 'campaign-collector.js',
+    filename: 'core.min.js',
     library: {
       name: 'CampaignCollector',
       type: 'umd',
