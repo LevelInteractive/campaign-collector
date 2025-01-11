@@ -78,7 +78,7 @@ export default class CampaignCollector
       'extension', // Extension
       'geo_int',   // Location (Interest)
       'geo_phy',   // Location (Physical)
-      'position',  // Position
+      //'position',  // Position
       'target',    // Target
       'network',   // Network
       'device',    // Device

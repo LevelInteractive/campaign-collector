@@ -57,3 +57,44 @@ import CampaignCollector from 'campaign-collector';
 // Initialize an instance
 window._CampaignData = new CampaignCollector();
 ```
+
+### Supported Campaign Parameters
+
+#### Standard Parameters
+
+Google has defined a set of standard UTM parameters that are widely supported across advertising/martech platforms. These parameters are natively supported by the library.
+
+- `utm_source`
+- `utm_medium`
+- `utm_campaign`
+- `utm_term`
+- `utm_content`
+- `utm_id`
+- `utm_marketing_tactic`
+- `utm_creative_format`
+- `utm_source_platform`
+
+#### Custom Parameters
+
+In addition to the standard parameters - this library offers flexibility for a set list of custom parameters. By default, the library will look for any parameter that starts with `$ns_`. `$ns` can be customized by setting the `namespace` config option to a different value. These parameters align closely with major advertising platform URL macros (e.g. Google Ads "ValueTrack" and similar). 
+
+- `$ns_platform`
+- `$ns_source`
+- `$ns_campaign_name`
+- `$ns_campaign`
+- `$ns_group`
+- `$ns_ad`
+- `$ns_creative`
+- `$ns_feed`
+- `$ns_product`
+- `$ns_extension`
+- `$ns_geo_int`
+- `$ns_geo_phy`
+- `$ns_device`
+- `$ns_matchtype`
+- `$ns_placement`
+- `$ns_network`
+- `$ns_target`
+
+> [!NOTE]
+> The custom parameters are not extendable at this time, we may offer that capability in future versions.
