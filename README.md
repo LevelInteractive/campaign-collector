@@ -4,9 +4,8 @@
 
 CampaignCollector is a small utility library that allows you to easily collect campaign parameters (`utm_` +) from a URL and store/persist them in browser storage. This is useful for integrating campaign data with lead generation forms and CRMs.
 
-> [!NOTE]
-> This library is a port/rewrite of [Attributor.js](https://github.com/derekcavaliero/attributor/). \
-> CampaignCollector offers more flexibility with its API than Attributor.js, and has been re-written with a modern Javascript footprint, and mulitple deployment/implementation options.
+> [!IMPORTANT]
+> This library does not send data to any analytics platform or 3rd party service. It is up to the implementor to decide how it is used.
 
 **Features**
 
@@ -15,8 +14,9 @@ CampaignCollector is a small utility library that allows you to easily collect c
 - Ability to define [field mappings](#fieldmap) for each parameter to attach data to form submissions.
 - Define 1st party cookies and global variables to capture and map along side your in-url campaign parameters.
 
-> [!IMPORTANT]
-> This library does not send data to any analytics platform or 3rd party service. It is up to you (the implementor) to decide how to use the data.
+> [!NOTE]
+> This library is a port/rewrite of [Attributor.js](https://github.com/derekcavaliero/attributor/). \
+> CampaignCollector offers more flexibility with its API than Attributor.js, and has been re-written with a modern Javascript footprint, and mulitple deployment/implementation options.
 
 ### Installation Options
 
