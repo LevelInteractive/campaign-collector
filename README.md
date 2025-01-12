@@ -49,12 +49,12 @@ r=o.getElementsByTagName(a)[0];r.parentNode.insertBefore(e,r);
 
 If you are using a build process and want to include the library as a dependency - you can install it via NPM.
 
-##### Install the Package
+**Install the Package**
 ```bash
 $ npm install campaign-collector
 ```
 
-##### Import the Package
+**Import the Package**
 ```javascript
 import CampaignCollector from 'campaign-collector';
 
