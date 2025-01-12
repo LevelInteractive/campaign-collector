@@ -1,6 +1,6 @@
 # CampaignCollector
 
-[![GZip Size](https://img.badgesize.io/levelinteractive/campaign-collector/main/dist/core.min.js?compression=gzip&label=JS%20GZip%20size)](https://github.com/levelinteractive/campaign-collector/blob/main/dist/core.min.js)
+[![GZip size](https://img.badgesize.io/levelinteractive/campaign-collector/main/dist/core.min.js?compression=gzip)](https://github.com/levelinteractive/campaign-collector/blob/main/dist/core.min.js)
 
 CampaignCollector is a small utility library that allows you to easily collect campaign parameters (`utm_` +) from a URL and store/persist them in browser storage. This is useful for integrating campaign data with lead generation forms and CRMs.
 
