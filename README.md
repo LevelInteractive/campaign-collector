@@ -1,14 +1,12 @@
-# Campaign Collector
+# CampaignCollector
 
 [![GZip Size](https://img.badgesize.io/levelinteractive/campaign-collector/main/dist/core.min.js?compression=gzip&label=JS%20GZip%20size)](https://github.com/levelinteractive/campaign-collector/blob/main/dist/core.min.js)
 
+CampaignCollector is a small utility library that allows you to easily collect campaign parameters (`utm_` +) from a URL and store/persist them in browser storage. This is useful for integrating campaign data with lead generation forms and CRMs.
+
 > [!NOTE]
-> CampaignCollector is a port/rewrite of [Attributor.js](https://github.com/derekcavaliero/attributor/). \
-> This library offers more flexibility with its API than Attributor.js, and has been written to be compatible with Google Tag Managers Sandboxed Javascript restrictions.
-
-### Overview
-
-Campaign Collector is a small library that allows you to easily collect UTM parameters from a URL and store/persist them in browser storage. This is useful for tracking campaign data across multiple pages on a website. 
+> This library is a port/rewrite of [Attributor.js](https://github.com/derekcavaliero/attributor/). \
+> CampaignCollector offers more flexibility with its API than Attributor.js, and has been re-written with a modern Javascript footprint, and mulitple deployment/implementation options.
 
 #### Features
 
