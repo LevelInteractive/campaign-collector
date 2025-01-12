@@ -9,8 +9,8 @@ CampaignCollector is a small utility library that allows you to easily collect c
 
 **Features**
 
-- Natively supports all [standard campaign parameters](#standard-parameters) (e.g. `utm_*`).
-- Supports storage of [custom parameters](#custom-parameters) with a defined prefix/namespace. 
+- Natively supports all [9 standard campaign parameters](#standard-parameters) (e.g. `utm_*`).
+- Supports storage of [17 custom parameters](#custom-parameters) with a defined prefix/namespace. 
 - Ability to define [field mappings](#fieldmap) for each parameter to attach data to form submissions.
 - Define 1st party cookies and global variables to capture and map along side your in-url campaign parameters.
 
