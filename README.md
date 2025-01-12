@@ -103,6 +103,24 @@ In addition to the standard parameters - this library offers flexibility for a s
 > [!NOTE]
 > The custom parameters are not extendable at this time, we may offer that capability in future versions - but there are no current plans to do so.
 
+### Session Logic
+
+The library uses a timeout-based session approach to store the "last" touch campaign data. This is similar to how Google Analytics functions (but not exact). 
+
+- An active session with explicit campaign data cannot be overwritten by referrer parsing.
+- On a users first visit, the `first` and `last` touch data will be the same.
+- Sessions expire after 30 minutes of inactivity (unless customized via `sessionTimeout` in the config). "Inactivity" is defined as no page views, or generic click events on the page.
+- First touch data can/will be misleading for browsers that cap cookie expiration at 7 days (e.g. Safari). This can be mitigated (to an extent) by rewriting the `_lvl_cc_first` cookie via a 1st party service - but will require infrastructure not provided by this library.
+
+**Scenario A:**
+
+1. A "first time visitor" enters the site on a page with `?utm_source=google&utm_medium=cpc&utm_campaign=helloworld` in the URL.
+2. A new session is started, and the `first` and `last` touch data is set to the above parameters.
+3. (10 Minutes Pass) The user opens a new tab in Google/Bing and searches your brand, then clicks on an organic result.
+4. A new session is NOT started -- because the active session has explicit campaign data. The existing session is extended an additional 30 minutes.
+5. (> 30 Minutes Pass) The user sees an organic social media post and clicks a link to your site.
+6. A new session IS started, and the `last` touch data is set to the explicit campaign data in the URL (if present) -OR- the referrer is parsed to implicitly set a source/medium.
+
 ### Configuration Properties
 
 #### `cookieDomain`
