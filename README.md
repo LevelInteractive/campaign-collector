@@ -8,7 +8,7 @@ CampaignCollector is a small utility library that allows you to easily collect c
 > This library is a port/rewrite of [Attributor.js](https://github.com/derekcavaliero/attributor/). \
 > CampaignCollector offers more flexibility with its API than Attributor.js, and has been re-written with a modern Javascript footprint, and mulitple deployment/implementation options.
 
-#### Features
+**Features**
 
 - Natively supports all [standard campaign parameters](#standard-parameters) (e.g. `utm_*`).
 - Supports storage of [custom parameters](#custom-parameters) with a defined prefix/namespace. 
