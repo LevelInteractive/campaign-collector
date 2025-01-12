@@ -1,8 +1,21 @@
 export default class CampaignCollector
 {
   #_libraryName = 'CampaignCollector';
+
+  /**
+   * The configuration object.
+   * This object is a deep merge of the default configuration settings and the user-defined configuration settings.
+   * 
+   * @type {Object}
+   */
   #config = null;
 
+  /**
+   * Default configuration settings.
+   * These settings can be customized by passing a config object to the constructor or the `create` factory method.
+   * 
+   * @type {Object}
+   */
   #defaults = {
     cookieDomain: null,
     decorateHostnames: [],
@@ -53,6 +66,13 @@ export default class CampaignCollector
 
   #params = null;
 
+  /**
+   * A list of parameters that are allowed to be stored in the session data.
+   * The `utm` namespace is reserved for UTM parameters, and the `$ns` namespace is reserved for custom parameters.
+   * This protects the session data (& structure) from getting out of control with unwanted or unexpected data.
+   * 
+   * @type {Object}
+   */
   #paramAllowList = {
     utm: [
       'source',
@@ -87,14 +107,38 @@ export default class CampaignCollector
     ],
   };
 
+  /**
+   * A list of expected parameters for each namespace.
+   * Used for session update logic and anomaly detection.
+   * 
+   * @type {Object}
+   */
   #paramsExpected = {
     utm: ['source', 'medium', 'campaign'],
     $ns: ['platform', 'campaign', 'group', 'ad'],
   };
 
+  /**
+   * Stores the referrer URL as a URL object.
+   * 
+   * @type {URL|null}
+   */
   #referrer = null;
+
+  /**
+   * The session data object.
+   * Contains the first and last touchpoint data.
+   * 
+   * @type {Object}
+   */
   #sessions = null;
 
+  /**
+   * A list of touchpoints and their expiration times.
+   * This object will be used for any future "touchpoint" configuration options.
+   * 
+   * @type {Object}
+   */
   #touchpoints = {
     first: {
       expires: [2, 'years'],
@@ -109,6 +153,11 @@ export default class CampaignCollector
    * The only reason this exists is for compatibility with Google Tag Managers, sandboxed JS 
    * "callInWindow" method, which can only call functions that are properties of an object.
    * GTM's sandboxed JS doens't support native ES6 classes (stupid - I know).
+   * 
+   * DO NOT USE THIS OUTSIDE A GTM TEMPLATE CONTEXT.
+   * 
+   * @param {Object} config - The configuration object for the instance being created.
+   * @param {string} globalName - The global variable (e.g. window) to assign the instance to.
    */
   static create(config = {}, globalName = null)
   {
@@ -146,8 +195,6 @@ export default class CampaignCollector
     this.#sessions = this.#sessionGetAll();
     this.#maybeUpdateSession();
 
-    console.log(this.#config);
-
     this.fill();
     this.#bindListeners();
 
@@ -164,6 +211,11 @@ export default class CampaignCollector
     console.timeEnd(this.#_libraryName);
   }
 
+  /**
+   * Returns the active session data.
+   * 
+   * @returns {Object|null}
+   */
   get activeSession()
   {
     const session = this.#sessions.last;
@@ -186,6 +238,16 @@ export default class CampaignCollector
     return this.#paramAllowList;
   }
 
+  /**
+   * Fills form inputs with campaign data based on the config `fieldMap`, and `fieldTargetMethod`.
+   * Accepts an optional settings parameter to override the default config values `fieldTargetMethod` , and `scope`.
+   * 
+   * @param {Object} settings
+   * @param {Array|string} settings.targetMethod - The method to use to select the input elements. Default: `name`.
+   * @param {Element} settings.scope - The DOM node/element scope to search for input elements when using `.querySelectorAll()`. Default: `document`.
+   * 
+   * @returns {void}
+   */
   fill(settings = {})
   {
     if (settings.hasOwnProperty('targetMethod'))
@@ -238,9 +300,20 @@ export default class CampaignCollector
     }
   }
 
+  /**
+   * Returns the campaign data object.
+   * 
+   * @param {Object} settings
+   * @param {boolean} settings.applyFilters - Whether to apply the filters defined in the config. Default: `false`.
+   * @param {Array} settings.without - An array of keys to exclude from the output. Default: `[]`.
+   * @param {boolean} settings.asJson - Whether to return the output as a JSON string. Default: `false`.
+   * 
+   * @returns {Object|string}
+   */
   grab({
     applyFilters = false,
-    without = []
+    asJson = false,
+    without = [],
   } = {})
   {
     const output = {};
@@ -260,9 +333,14 @@ export default class CampaignCollector
     if (! without.includes('cookies'))
       output.cookies = this.#collectCookies({ applyFilters });
 
-    return output;
+    return asJson ? JSON.stringify(output) : output;
   }
 
+  /**
+   * Binds event listeners to the document to handle input field population and session hydration, and history state changes.
+   * 
+   * @returns {void}
+   */
   #bindListeners()
   {
     const handleBeforeSubmit = (e) => {
@@ -304,6 +382,13 @@ export default class CampaignCollector
     document.addEventListener('touchstart', handleBeforeSubmit); 
   }
 
+
+  /**
+   * Checks if the expected parameters are present for a given parameter namespace.
+   * 
+   * @param {string} namespace - The namespace to check for expected parameters.
+   * @returns {boolean}
+   */
   #checkExpectedParams(namespace)
   {
     const params = this.#params[namespace];
@@ -324,6 +409,13 @@ export default class CampaignCollector
     return true;
   }
 
+  /**
+   * Collects cookies based on the `fieldMap.cookies` configuration.
+   * 
+   * @param {Object} settings
+   * @param {boolean} settings.applyFilters - Whether to apply the filters defined in the config. Default: `false`.
+   * @returns {Object}
+   */
   #collectCookies({
     applyFilters = false,
   } = {})
@@ -358,6 +450,13 @@ export default class CampaignCollector
     return cookies;
   }
 
+  /**
+   * Resolves & collects global variables based on the `fieldMap.globals` configuration.
+   * 
+   * @param {Object} settings
+   * @param {boolean} settings.applyFilters - Whether to apply the filters defined in the config. Default: `false`.
+   * @returns {Object}
+   */
   #collectGlobals({
     applyFilters = false
   } = {}) 
@@ -388,11 +487,24 @@ export default class CampaignCollector
     return globals;
   }
 
+  /**
+   * Deep copies an object using JSON serialization.
+   * 
+   * @param obj - The object to deep copy.
+   * @returns {Object}
+   */
   #deepCopy(obj)
   {
     return JSON.parse(JSON.stringify(obj));
   }
 
+  /**
+   * Deep merges two objects.
+   * 
+   * @param {Object} target - The target object to merge into.
+   * @param {Object} source - The source object to merge from.
+   * @returns {Object}
+   */
   #deepMerge(target, source) 
   {
     for (const key in source) {
@@ -412,6 +524,13 @@ export default class CampaignCollector
     return target;
   }
 
+  /**
+   * Flattens an object into a single level object.
+   * 
+   * @param {*} obj - The object to flatten.
+   * @param {*} prefix - The prefix to prepend to the keys.
+   * @returns {Object}
+   */
   #flattenObject(obj, prefix = '') 
   {
     return Object.keys(obj).reduce((acc, key) => {
@@ -427,6 +546,13 @@ export default class CampaignCollector
     }, {});
   }
 
+  /**
+   * Makes a CSS selector string based on one or more target methods and a selector string.
+   * 
+   * @param {Array} methods - The target methods to use to select the input elements.
+   * @param {string} selector - The selector string to use to add specificity to the target method.
+   * @returns {string}
+   */
   #makeSelectorString(methods = [], selector)
   {
     return methods.map(method => {
@@ -443,12 +569,27 @@ export default class CampaignCollector
     }).join(',');
   }
 
+  /**
+   * Gets a cookie value by name.
+   * 
+   * @param {string} name - The name of the cookie to get.
+   * @returns {string|null}
+   */
   #getCookie(name)
   {
     const match = document.cookie.match(new RegExp('(^| )' + name + '=([^;]+)'));
     return match ? match[2].trim() : null;
   }
 
+  /**
+   * Gets the number of seconds for a given value and unit.
+   * 
+   * @param {Object} settings
+   * @param {number} settings.value - The value to convert to seconds.
+   * @param {string} settings.units - The unit of time to convert to seconds.
+   * 
+   * @returns {integer}
+   */
   #getSecondsFor({
     value = 0,
     units = 'minutes'
@@ -471,17 +612,17 @@ export default class CampaignCollector
     return parseInt(value) * secondsPerUnit;
   }
 
+  /**
+   * Handles the session data update logic.
+   * 1. Defaults to (direct)/(none) to match GA4 defaults. 
+   * 2. Referrer parsing can never overwrite an active session w/ explicit campaign data.
+   * 3. If medium = email (or loosely matches email) and an active session exists w/ explicit campaign data -- it will be ignored.
+   * 4. If the session is the first touch - the last touch data should be set to reference the first touch data.
+   *
+   * @returns {void}
+   */
   #maybeUpdateSession()
   {
-    /**
-     * Heirarchy of session data:
-     * 1. Defaults to (direct)/(none) to match GA4 defaults. 
-     * 2. Referrer parsing can never overwrite an active session w/ explicit campaign data.
-     * 3. If medium = email (or loosely matches email) and an active session exists w/ explicit campaign data -- it will be ignored.
-     *    Most of the time if an active session is present, the user was explicitly told to check their email for a link (e.g. password reset or gated content delivered via email).
-     * 4. If the session is the first touch - the last touch data should be set to the current parsed data.
-     */
-
     const $ns = this.#config.namespace;
 
     let data = {
@@ -531,6 +672,12 @@ export default class CampaignCollector
     this.#sessionSet('last', data);
   }
 
+  /**
+   * Monkeypatches the history.pushState() method to handle SPA navigation.
+   * This method is only called if the `config.enableSpaSupport` is set to `true`.
+   * 
+   * @returns {void}
+   */
   #monkeyPatchHistory() 
   {
     console.warn(`${this.#_libraryName}.js: config.enableSpaSupport = true monkeypatches the the history.pushState() method.`)
@@ -549,6 +696,11 @@ export default class CampaignCollector
     };
   }
 
+  /**
+   * Parses the referrer URL and returns the source and medium based on the `config.parseRules` configuration.
+   * 
+   * @returns {Object}
+   */
   #parseReferrer()
   {
     let parsed = {};
@@ -585,6 +737,11 @@ export default class CampaignCollector
     return parsed;
   }
 
+  /**
+   * Extracts the domain from the current hostname and sets it as `config.cookieDomain` if not already set in the config.
+   * 
+   * @returns {void}
+   */
   #resolveCookieDomain() 
   {
     if (this.#config.cookieDomain) 
@@ -606,6 +763,12 @@ export default class CampaignCollector
     this.#config.cookieDomain = rootDomain;
   }
 
+  /**
+   * Resolves a global variable by a dot-notation path.
+   * 
+   * @param {string} path - The dot-notation path to the global variable.
+   * @returns {*}
+   */
   #resolveGlobal(path) 
   {
     return path.split('.').reduce((prev, curr) => {
@@ -613,6 +776,12 @@ export default class CampaignCollector
     }, window);
   }
 
+  /**
+   * Sanitizes a string value by trimming, truncating, and removing unwanted characters.
+   * 
+   * @param {string} value - The string value to sanitize.
+   * @returns {string}
+   */
   #sanitizeString(value) 
   {
     if (! value) 
@@ -639,6 +808,11 @@ export default class CampaignCollector
     return sanitized;
   }
 
+  /**
+   * Gets all session data for all touchpoints in the private `#touchpoints` class property.
+   * 
+   * @returns {Object}
+   */
   #sessionGetAll()
   {
     let data = {};
@@ -659,6 +833,11 @@ export default class CampaignCollector
     return data;
   }
 
+  /**
+   * Merges the default `config.fieldMap` values with the instance-defined `config.fieldMap` values.
+   * 
+   * @returns {void}
+   */
   #setFieldMap()
   {
     const fieldMap = this.#config.fieldMap;
@@ -697,6 +876,11 @@ export default class CampaignCollector
     }
   }
 
+  /**
+   * Sets the allowed parameters for the custom parameter namespace.
+   * 
+   * @returns {void}
+   */
   #setParamAllowList()
   {
     let allowed = this.#paramAllowList.$ns;
@@ -709,6 +893,12 @@ export default class CampaignCollector
     delete this.#paramsExpected.$ns;
   }
 
+  /**
+   * Sets the class `#params` property as an object of parameters grouped by namespace as the key.
+   * 
+   * @param {Array} namespaces - The namespaces to set the query parameters for.
+   * @returns {void}
+   */
   #setParams(namespaces = []) 
   {
     const params = this.url.searchParams;
@@ -750,6 +940,12 @@ export default class CampaignCollector
     this.#params = data;
   }
 
+  /**
+   * Sets the referrer URL as a URL object in the private `#referrer` class property.
+   * 
+   * @param {boolean} clear - Whether to clear the referrer. Default: `false`.
+   * @returns {void}
+   */
   #setReferrer(clear = false)
   {
     let referrer;
@@ -763,6 +959,12 @@ export default class CampaignCollector
     this.#referrer = referrer;
   }
 
+  /**
+   * Manually ends a session by removing the session cookie or localStorage item.
+   * 
+   * @param {string} touchpoint - The touchpoint to end the session for.
+   * @returns {void}
+   */
   #sessionEnd(touchpoint)
   {
     const key = this.#storageKey(touchpoint);
@@ -774,6 +976,12 @@ export default class CampaignCollector
     }
   }
 
+  /**
+   * Retrieves & decodes a session value from storage by touchpoint.
+   * 
+   * @param {string} touchpoint - The touchpoint to get the session value for.
+   * @returns {Object|null}
+   */
   #sessionGet(touchpoint)
   {
     const key = this.#storageKey(touchpoint);
@@ -796,6 +1004,11 @@ export default class CampaignCollector
     return value;
   }
 
+  /**
+   * Hydrates (e.g. extends lifespan) of the session data for the last touchpoint.
+   * 
+   * @returns {void}
+   */
   #sessionHydrate()
   {
     let value = this.#sessionGet('last');
@@ -806,6 +1019,14 @@ export default class CampaignCollector
     this.#sessionSet('last', value);
   }
 
+  /**
+   * Sets & encodes a session value in storage by touchpoint.
+   * Also responsible for setting the session start/end timestamps in the storage object.
+   * 
+   * @param {string} touchpoint - The touchpoint to set the session value for.
+   * @param {Object} value - The session data to set.
+   * @returns {void}
+   */
   #sessionSet(touchpoint, value)
   { 
     const now = Math.ceil(Date.now() / 1000);
@@ -836,6 +1057,12 @@ export default class CampaignCollector
     }
   }
 
+  /**
+   * Gets the storage key by touchpoint.
+   * 
+   * @param {string} touchpoint 
+   * @returns {string}
+   */
   #storageKey(touchpoint)
   {
     return `_lvl_cc_${touchpoint}`;
