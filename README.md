@@ -1,22 +1,22 @@
 # CampaignCollector
 
-[![GZip Size](https://img.badgesize.io/levelinteractive/campaign-collector/main/dist/core.min.js?compression=gzip&label=JS%20GZip%20size)](https://github.com/levelinteractive/campaign-collector/blob/main/dist/core.min.js)
+[![GZip size](https://img.badgesize.io/levelinteractive/campaign-collector/main/dist/core.min.js?compression=gzip)](https://github.com/levelinteractive/campaign-collector/blob/main/dist/core.min.js)
 
 CampaignCollector is a small utility library that allows you to easily collect campaign parameters (`utm_` +) from a URL and store/persist them in browser storage. This is useful for integrating campaign data with lead generation forms and CRMs.
+
+> [!IMPORTANT]
+> This library does not send data to any analytics platform or 3rd party service. It is up to the implementor to decide how it is used.
+
+**Features**
+
+- Natively supports all [9 standard campaign parameters](#standard-parameters) (e.g. `utm_*`).
+- Supports storage of [17 custom parameters](#custom-parameters) with a defined prefix/namespace. 
+- Ability to define [field mappings](#fieldmap) for each parameter to attach data to form submissions.
+- Define 1st party cookies and global variables to capture and map along side your in-url campaign parameters.
 
 > [!NOTE]
 > This library is a port/rewrite of [Attributor.js](https://github.com/derekcavaliero/attributor/). \
 > CampaignCollector offers more flexibility with its API than Attributor.js, and has been re-written with a modern Javascript footprint, and mulitple deployment/implementation options.
-
-#### Features
-
-- Natively supports all [standard campaign parameters](#standard-parameters) (e.g. `utm_*`).
-- Supports storage of [custom parameters](#custom-parameters) with a defined prefix/namespace. 
-- Ability to define [field mappings](#fieldmap) for each parameter to attach data to form submissions.
-- Define 1st party cookies and global variables to capture and map along side your in-url campaign parameters.
-
-> [!IMPORTANT]
-> This library does not send data to any analytics platform or 3rd party service. It is up to you (the implementor) to decide how to use the data.
 
 ### Installation Options
 
@@ -49,12 +49,12 @@ r=o.getElementsByTagName(a)[0];r.parentNode.insertBefore(e,r);
 
 If you are using a build process and want to include the library as a dependency - you can install it via NPM.
 
-##### Install the Package
+**Install the Package**
 ```bash
 $ npm install campaign-collector
 ```
 
-##### Import the Package
+**Import the Package**
 ```javascript
 import CampaignCollector from 'campaign-collector';
 
