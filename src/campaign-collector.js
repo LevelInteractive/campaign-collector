@@ -1,6 +1,9 @@
 export default class CampaignCollector
 {
   #_libraryName = 'CampaignCollector';
+  #_libraryVersion = '1.0.0';
+
+  #clientId;
 
   /**
    * The configuration object.
@@ -21,12 +24,13 @@ export default class CampaignCollector
     decorateHostnames: [],
     enableSpaSupport: false,
     fieldMap: {
-      $json: 'campaign_json',
-      last: {
+      client_id: '$ns_client_id',
+      json: '$ns_attribution_json',
+      first: {
         utm: null,
         $ns: null,
       },
-      first: {
+      last: {
         utm: null,
         $ns: null,
       },
@@ -36,6 +40,8 @@ export default class CampaignCollector
     fieldTargetMethod: ['name'],
     fieldDataAttribute: 'data-campaign-collector',
     filters: {},
+    firstPartyLeadEndpoint: null,
+    firstPartyCookieEndpoint: null,
     namespace: 'lvl',
     parseRules: {
       organic: {
@@ -53,14 +59,20 @@ export default class CampaignCollector
       },
       social: {
         facebook: '^www\.(facebook)\.com$',
-        instagram: '^l\.(instagram)\.com$',
+        instagram: '(instagram)\.com$',
         linkedin: '^www\.(linkedin)\.com$',
+        tiktok: '^www\.(tiktok)\.com$',
+        snapchat: '^www\.(snapchat)\.com$',
         x: '^t\.co|x\.com$',
+        pinterest: '^www\.(pinterest)\.com$',
+        reddit: '^www\.(reddit)\.com$',
+        quora: '^www\.(quora)\.com$',
       }
     },
     reportAnomalies: false,
     sessionTimeout: null,
     storageMethod: 'cookie', // anything other than 'cookie' will default to 'local'
+    storageNamespace: 'cc',
     storeAsBase64: true,
   };
 
@@ -89,6 +101,7 @@ export default class CampaignCollector
     $ns: [
       'platform',  // Platform
       'source',    // Source
+      'campaign_name', // Campaign Name
       'campaign',  // Campaign ID
       'group',     // Set/Group ID
       'ad',        // Ad ID
@@ -141,12 +154,14 @@ export default class CampaignCollector
    */
   #touchpoints = {
     first: {
-      expires: [2, 'years'],
+      expires: [400, 'days'],
     },
     last: {
       expires: [30, 'minutes'],
     }
   };
+
+  #url;
 
   /**
    * This is a factory method that returns an object with the grab and fill methods.
@@ -175,15 +190,19 @@ export default class CampaignCollector
     }, {});
   }
 
-  constructor(config = {}) 
+  constructor(config = {})
   {
-    console.time(this.#_libraryName);
+    //console.time(this.#_libraryName);
 
-    this.url = new URL(window.location.href);
+    this.#url = new URL(window.location.href);
     this.#config = this.#deepMerge(this.#defaults, config);
+    
+    this.#setNamespace();
     this.#setFieldMap();
 
     this.#resolveCookieDomain();
+
+    this.#setClientId();
 
     this.#setReferrer();
     this.#setParamAllowList();
@@ -208,7 +227,7 @@ export default class CampaignCollector
       });
     }
 
-    console.timeEnd(this.#_libraryName);
+    //console.timeEnd(this.#_libraryName);
   }
 
   /**
@@ -225,12 +244,23 @@ export default class CampaignCollector
 
     const now = Math.ceil(Date.now() / 1000);
 
-    if (session.$exp < now) {
-      this.#sessions.last = null;
+    // This ensures that we don't return an expired session stored in memory.
+    if (session._exp < now) {
+      this.#sessionEnd('last');
       this.#maybeUpdateSession();
     }
 
-    return this.#sessions.last;
+    if (session._ref) {
+      const reference = this.#sessionGet(session._ref);
+
+      if (! reference)
+        return session;
+
+      session.lvl = reference.lvl;
+      session.utm = reference.utm;
+    }
+
+    return session;
   }
 
   get allowedFields()
@@ -274,11 +304,31 @@ export default class CampaignCollector
 
     });
 
-    console.log(fieldMap);
-
     for (const [group, fields] of Object.entries(fieldMap)) {
 
-      if (group === '$json') {
+      if (typeof fields === 'string') {
+
+        let selectorString = fields.replace('$ns', this.#config.namespace);
+        const inputs = query.scope.querySelectorAll(this.#makeSelectorString(query.targetMethod, selectorString));
+
+        if (inputs) {
+
+          const values = {
+            client_id: this.#clientId,
+            json: this.grab({
+              asJson: true,
+              without: ['params']
+            }),
+          };
+
+          Array.from(inputs).forEach(input => {
+            input.value = values[group];
+            input.setAttribute('value', values[group]);
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+          });
+
+        }
+        
         continue;
       }
 
@@ -300,6 +350,21 @@ export default class CampaignCollector
     }
   }
 
+  #setClientId() 
+  {
+    const storageName = `_${this.#config.storageNamespace}_cid`;
+    this.#clientId = this.#getCookie(storageName);
+
+    if (! this.#clientId)
+      this.#clientId = `CC.1.${Date.now()}.${Math.floor(Math.random() * Number.MAX_SAFE_INTEGER)}`;
+
+    if (this.#config.storageMethod === 'cookie') {
+      document.cookie = `${storageName}=${this.#clientId}; max-age=${this.#getSecondsFor({value: 400, units: 'days'})}; path=/; domain=${this.#config.cookieDomain}; secure`;
+    } else { 
+      localStorage.setItem(storageName, this.#clientId);
+    }
+  }
+
   /**
    * Returns the campaign data object.
    * 
@@ -317,6 +382,9 @@ export default class CampaignCollector
   } = {})
   {
     const output = {};
+
+    if (! without.includes('client_id'))
+      output.client_id = this.#clientId;
 
     if (! without.includes('params'))
       output.params = this.#params;
@@ -336,6 +404,178 @@ export default class CampaignCollector
     return asJson ? JSON.stringify(output) : output;
   }
 
+  async #sha256(value) 
+  {
+    const encoder = new TextEncoder();
+    const data = encoder.encode(value);
+    
+    const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+    
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+    
+    return hashHex;
+  }
+
+  /**
+   * Sends a base 64 encoded JSON payload to a 1st party defined endpoint.
+   * Properties and User Data object keys must be in snake_case format (or they'll be thrown out).
+   * @param {*} properties 
+   * @param {*} userData 
+   */
+  lead(properties = {}, userData = {})
+  {
+    if (! this.#config.firstPartyLeadEndpoint)
+      throw new Error('`firstPartyLeadEndpoint` is required to send lead payload.');
+
+    let payload = {
+      meta: {
+        client_id: this.#clientId,
+        timestamp: Date.now(),
+        screen: [screen.width, screen.height],
+        viewport: [innerWidth, innerHeight],
+        language: navigator.language,
+        user_agent: navigator.userAgent,
+        via: `${this.#_libraryName}@${this.#_libraryVersion}`,
+      },
+      user: {},
+      properties: {},
+      attribution: this.grab({
+        without: ['client_id', 'params']
+      })
+    };
+
+    // Remove any properties that are not in snake_case via regex match
+    Object.keys(properties).forEach(key => {
+      if (! /^[a-z_]+$/.test(key))
+        delete properties[key];
+    });
+
+    // There are a few properties that we send as meta if present
+    [
+      'form_id',
+      'form_name',
+      'form_provider',
+    ].forEach(field => {
+      if (properties[field]) 
+        payload.meta[field] = this.#sanitizeString(properties[field]);
+
+      delete properties[field];
+    });
+
+    [
+      'first_name',
+      'last_name',
+      'email',
+      'phone',
+      'city',
+      'region',
+      'postal_code',
+      'country',
+    ].forEach(field => {
+      if (! userData[field]) 
+        return;
+
+      payload.user[field] = userData[field].trim().toLowerCase();
+
+      if (field === 'email')
+        payload.user.email_domain = userData[field].split('@')[1];
+
+      delete userData[field];
+    });
+
+    // Whatever remains are sent as custom properties
+    payload.properties = properties;
+    
+    this.#send(`https://${this.#config.firstPartyLeadEndpoint}`, payload);
+  }
+
+  async #send(endpoint, payload)
+  {
+    console.log(payload);
+
+    if (Object.keys(payload.user).length === 0) {
+      navigator.sendBeacon(endpoint, btoa(JSON.stringify(payload)));
+      // fetch(endpoint, {
+      //   method: 'POST',
+      //   body: btoa(JSON.stringify(payload)),
+      //   keepalive: true,
+      // });
+      return;
+    }
+
+    const willHash = [
+      'first_name',
+      'last_name',
+      'email',
+      'phone',
+      'city',
+      'postal_code',
+      'date_of_birth',
+      'gender',
+    ];
+
+    const transforms = {
+      phone: (value) => {
+        value = value.replace(/[^0-9]/g, '');
+
+        // We don't care about non-US phone numbers
+        if (value.length < 10 || value.length > 11)
+          return null;
+
+        if (value[0] !== '1' && value.length === 11)
+          return null;
+
+        value = value.length === 10 ? `1${value}` : `${value}`;
+
+        return [
+          value,
+          `+${value}`,
+        ];
+      },
+      city: (value) => value.replace(/[^a-z]/g, ''),
+      region: (value) => (value.length !== 2) ? null : value,
+      country: (value) => (value.length !== 2) ? null : value,
+    };
+    
+    const processedEntries = await Promise.all(
+      Object.entries(payload.user)
+        .map(async ([field, value]) => {
+          if (!value) return null;
+
+          let processedValue = transforms[field] ? transforms[field](value) : value;
+          if (!processedValue) return null;
+
+          if (Array.isArray(processedValue)) {
+            const hashedArray = await Promise.all(
+              processedValue.map(async v => willHash.includes(field) ? await this.#sha256(v) : v)
+            );
+            // Only return if we have valid values in the array
+            return hashedArray.some(v => v) ? [field, hashedArray] : null;
+          } else {
+            const hashedValue = willHash.includes(field) ? await this.#sha256(processedValue) : processedValue;
+            return hashedValue ? [field, hashedValue] : null;
+          }
+        })
+    );
+
+    // Filter out null entries and create new user object
+    const validEntries = processedEntries.filter(entry => entry !== null);
+    if (validEntries.length > 0) {
+      payload.user = Object.fromEntries(validEntries);
+    } else {
+      payload.user = {};
+    }
+
+    // fetch(endpoint, {
+    //   method: 'POST',
+    //   body: btoa(JSON.stringify(payload)),
+    //   keepalive: true,
+    // });
+    
+    navigator.sendBeacon(endpoint, btoa(JSON.stringify(payload)));
+  }
+
   /**
    * Binds event listeners to the document to handle input field population and session hydration, and history state changes.
    * 
@@ -343,25 +583,6 @@ export default class CampaignCollector
    */
   #bindListeners()
   {
-    const handleBeforeSubmit = (e) => {
-      if (! e.target.matches('[type="submit"]'))
-        return;
-
-      const form = e.target.closest('form');
-        
-      this.fill(form);
-
-      let data;
-
-      form.querySelectorAll(this.#makeSelectorString(this.#config.fieldTargetMethod, this.#config.fieldMap.$json)).forEach(input => {
-        data = data ?? JSON.stringify(this.grab({
-          without: ['params']
-        }));
-
-        input.value = data;
-      });
-    };
-
     if (this.#config.enableSpaSupport) {
       this.#monkeyPatchHistory();
 
@@ -374,12 +595,25 @@ export default class CampaignCollector
       window.onpopstate = history.onpushstate = handleSpaNavigation;
     }
 
-    document.addEventListener('mousedown', (e) => {
-      handleBeforeSubmit(e);
-      this.#sessionHydrate();
-    });
+    const deferredFill = (e) => {
+      // if (! e.target.matches('[type="submit"]'))
+      //   return;
 
-    document.addEventListener('touchstart', handleBeforeSubmit); 
+      const form = e.target.closest('form');
+
+      if (! form)
+        return;
+        
+      this.fill(form);
+
+    };
+
+    ['mousedown', 'touchstart'].forEach((event) => {
+      document.addEventListener(event, (e) => {
+        deferredFill(e);
+        this.#sessionHydrate();
+      });
+    });
   }
 
 
@@ -459,7 +693,7 @@ export default class CampaignCollector
    */
   #collectGlobals({
     applyFilters = false
-  } = {}) 
+  } = {})
   {
     let globals = {};
     
@@ -505,7 +739,7 @@ export default class CampaignCollector
    * @param {Object} source - The source object to merge from.
    * @returns {Object}
    */
-  #deepMerge(target, source) 
+  #deepMerge(target, source)
   {
     for (const key in source) {
       if (source.hasOwnProperty(key)) {
@@ -647,7 +881,7 @@ export default class CampaignCollector
       Object.assign(data.utm, this.#parseReferrer());
 
     if (this.#sessions?.first) {
-      console.log('first touchpoint exists');
+      // console.log('first touchpoint exists');
       // If the last touch session cookie has expired - or if the current parsed session source is not direct - the last touch session 
       // cookie should be set to the latest parsed data.
       // Otherwise the existing last touch data will be persisted until the next non-direct source is encountered.
@@ -662,7 +896,7 @@ export default class CampaignCollector
       this.#sessionSet('first', data);
 
       data = {
-        $ref: 'first',
+        _ref: 'first',
       };
     }
   
@@ -712,7 +946,7 @@ export default class CampaignCollector
 
     parsed = {
       source: this.#referrer.hostname,
-      medium: '(referral)'
+      medium: 'referral'
     };
     
     for (const [medium, rules] of Object.entries(this.#config.parseRules)) {
@@ -723,7 +957,7 @@ export default class CampaignCollector
           continue;
           
         parsed.source = source;
-        parsed.medium = `(${medium})`;
+        parsed.medium = `${medium}`;
       
         break;
         
@@ -742,12 +976,12 @@ export default class CampaignCollector
    * 
    * @returns {void}
    */
-  #resolveCookieDomain() 
+  #resolveCookieDomain()
   {
     if (this.#config.cookieDomain) 
       return;
 
-    const hostname = this.url.hostname;
+    const hostname = this.#url.hostname;
 
     if (hostname === 'localhost')
       return '';
@@ -782,7 +1016,7 @@ export default class CampaignCollector
    * @param {string} value - The string value to sanitize.
    * @returns {string}
    */
-  #sanitizeString(value) 
+  #sanitizeString(value)
   {
     if (! value) 
       return '';
@@ -823,7 +1057,7 @@ export default class CampaignCollector
 
       data[touchpoint] = this.#sessionGet(touchpoint);
       
-      if (this.#config.storageMethod !== 'cookie' && data[touchpoint]?.$exp < now) {
+      if (this.#config.storageMethod !== 'cookie' && data[touchpoint]?._exp < now) {
         this.#sessionEnd(touchpoint);
         data[touchpoint] = null;
       }
@@ -901,7 +1135,7 @@ export default class CampaignCollector
    */
   #setParams(namespaces = []) 
   {
-    const params = this.url.searchParams;
+    const params = this.#url.searchParams;
     let data = {};
 
     namespaces = namespaces.length > 0 ? namespaces : [this.#config.namespace];
@@ -968,6 +1202,8 @@ export default class CampaignCollector
   #sessionEnd(touchpoint)
   {
     const key = this.#storageKey(touchpoint);
+
+    this.#sessions[touchpoint] = null;
     
     if (this.#config.storageMethod === 'cookie') {
       document.cookie = `${key}=; max-age=0; path=/; domain=${this.#config.cookieDomain}`;
@@ -990,11 +1226,8 @@ export default class CampaignCollector
     if (! value)
       return null;
     
-    if (value.startsWith('64:'))
+    if (value.startsWith('$:'))
       value = atob(value.split(':')[1]);
-    
-    if (value.$ref)
-      return this.#sessionGet(value.$ref);
 
     value = JSON.parse(value);
 
@@ -1031,8 +1264,8 @@ export default class CampaignCollector
   { 
     const now = Math.ceil(Date.now() / 1000);
 
-    if (! value.$set)
-      value.$set = now;
+    if (! value._set)
+      value._set = now;
 
     const [expiresIn, units] = this.#touchpoints[touchpoint].expires;
 
@@ -1041,12 +1274,14 @@ export default class CampaignCollector
       units
     });
 
-    value.$exp = maxAge + now;
+    value._exp = maxAge + now;
 
-    value = JSON.stringify(value);
+    this.#sessions[touchpoint] = value;
+
+    value = JSON.stringify(value);    
 
     if (this.#config.storeAsBase64)
-      value = `64:${btoa(value)}`;
+      value = `$:${btoa(value)}`;
     
     const key = this.#storageKey(touchpoint);
 
@@ -1054,6 +1289,25 @@ export default class CampaignCollector
       document.cookie = `${key}=${value}; max-age=${maxAge}; path=/; domain=${this.#config.cookieDomain}; secure`;
     } else { 
       localStorage.setItem(key, value);
+    }
+  }
+
+  #setNamespace()
+  {
+    let fallback = 'lvl';
+    let custom = this.#config.namespace.toLowerCase().trim();
+    
+    if (custom == fallback)
+      return;
+
+    const checks = [
+      (/[a-z]{2,4}/.test(custom)),
+      (custom !== 'utm'),
+    ];
+
+    if (checks.includes(false)) {
+      console.warn(`Invalid namespace: Defaulting to "lvl".`);
+      this.#config.namespace = fallback;
     }
   }
 
@@ -1065,6 +1319,6 @@ export default class CampaignCollector
    */
   #storageKey(touchpoint)
   {
-    return `_lvl_cc_${touchpoint}`;
+    return `_${this.#config.storageNamespace}_${touchpoint}`;
   }  
 }
