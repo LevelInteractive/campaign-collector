@@ -70,6 +70,7 @@ export default class CampaignCollector
       }
     },
     reportAnomalies: false,
+    sdk: null,
     sessionTimeout: null,
     storageMethod: 'cookie', // anything other than 'cookie' will default to 'local'
     storageNamespace: 'cc',
@@ -451,14 +452,26 @@ export default class CampaignCollector
       sent_at: new Date().toISOString(),
     };
 
-    // @todo - handle consent: {} object.
+    if (this.#config.sdk)
+      payload.context.sdk += `/${this.#config.sdk}`;
+
+    // Consent @todo
+
+    // Properties
 
     // Remove any properties that are not in snake_case via regex match
     Object.keys(properties).forEach(key => {
-      if (! /^[a-z_]+$/.test(key))
+      if (! /^[a-z_]+$/.test(key)) {
+        console.warn(`${this.#_libraryName}.js: Removing "${key}" from lead payload. Keys must be in snake_case format.`);
         delete properties[key];
+      }
     });
 
+    // Whatever remains are sent as custom properties
+    if (Object.keys(properties).length > 0)
+      payload.properties = properties;
+    
+    // User Data
     [
       'first_name',
       'last_name',
@@ -483,89 +496,77 @@ export default class CampaignCollector
       delete userData[field];
     });
 
-    // Whatever remains are sent as custom properties
-
-    if (properties.keys.length > 0)
-      payload.properties = properties;
-    
     this.#send(`https://${this.#config.firstPartyLeadEndpoint}`, payload);
   }
 
   async #send(endpoint, payload)
   {
-    if (Object.keys(payload.user).length === 0) {
-      // navigator.sendBeacon(endpoint, btoa(JSON.stringify(payload)));
-      fetch(endpoint, {
-        method: 'POST',
-        body: btoa(JSON.stringify(payload)),
-        keepalive: true,
-      });
-      return;
-    }
+    if (payload.user) {
+      const willHash = [
+        'first_name',
+        'last_name',
+        'email',
+        'phone',
+        'city',
+        'postal_code',
+        'date_of_birth',
+        'gender',
+      ];
 
-    const willHash = [
-      'first_name',
-      'last_name',
-      'email',
-      'phone',
-      'city',
-      'postal_code',
-      'date_of_birth',
-      'gender',
-    ];
+      const transforms = {
+        phone: (value) => {
+          value = value.replace(/[^0-9]/g, '');
 
-    const transforms = {
-      phone: (value) => {
-        value = value.replace(/[^0-9]/g, '');
-
-        // We don't care about non-US phone numbers
-        if (value.length < 10 || value.length > 11)
-          return null;
-
-        if (value[0] !== '1' && value.length === 11)
-          return null;
-
-        value = value.length === 10 ? `1${value}` : `${value}`;
-
-        return [
-          value,
-          `+${value}`,
-        ];
-      },
-      city: (value) => value.replace(/[^a-z]/g, ''),
-    };
-    
-    const processedEntries = await Promise.all(
-      Object.entries(payload.user)
-        .map(async ([field, value]) => {
-          
-          if (! value) 
+          // We don't care about non-US phone numbers
+          if (value.length < 10 || value.length > 11)
             return null;
 
-          let processedValue = transforms[field] ? transforms[field](value) : value;
-
-          if (! processedValue) 
+          if (value[0] !== '1' && value.length === 11)
             return null;
 
-          if (Array.isArray(processedValue)) {
-            const hashedArray = await Promise.all(
-              processedValue.map(async v => willHash.includes(field) ? await this.#sha256(v) : v)
-            );
-            // Only return if we have valid values in the array
-            return hashedArray.some(v => v) ? [field, hashedArray] : null;
-          } else {
-            const hashedValue = willHash.includes(field) ? await this.#sha256(processedValue) : processedValue;
-            return hashedValue ? [field, hashedValue] : null;
-          }
-        })
-    );
+          value = value.length === 10 ? `1${value}` : `${value}`;
 
-    // Filter out null entries and create new user object
-    const validEntries = processedEntries.filter(entry => entry !== null);
-    if (validEntries.length > 0) {
-      payload.user = Object.fromEntries(validEntries);
-    } else {
-      payload.user = {};
+          return [
+            value,
+            `+${value}`,
+          ];
+        },
+        city: (value) => value.replace(/[^a-z]/g, ''),
+      };
+      
+      const processedEntries = await Promise.all(
+        Object.entries(payload.user)
+          .map(async ([field, value]) => {
+            
+            if (! value) 
+              return null;
+
+            let processedValue = transforms[field] ? transforms[field](value) : value;
+
+            if (! processedValue) 
+              return null;
+
+            if (Array.isArray(processedValue)) {
+              const hashedArray = await Promise.all(
+                processedValue.map(async v => willHash.includes(field) ? await this.#sha256(v) : v)
+              );
+              // Only return if we have valid values in the array
+              return hashedArray.some(v => v) ? [field, hashedArray] : null;
+            } else {
+              const hashedValue = willHash.includes(field) ? await this.#sha256(processedValue) : processedValue;
+              return hashedValue ? [field, hashedValue] : null;
+            }
+          })
+      );
+
+      // Filter out null entries and create new user object
+      const validEntries = processedEntries.filter(entry => entry !== null);
+      if (validEntries.length > 0) {
+        payload.user = Object.fromEntries(validEntries);
+      } else {
+        payload.user = {};
+      }
+
     }
 
     fetch(endpoint, {
