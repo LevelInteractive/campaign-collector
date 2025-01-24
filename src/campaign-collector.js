@@ -430,7 +430,6 @@ export default class CampaignCollector
 
     let payload = {
       anonymous_id: this.#anonymousId,
-      consent: {},
       context: {
         attribution: this.grab({
           without: ['anonymous_id', 'params', 'globals']
@@ -449,11 +448,10 @@ export default class CampaignCollector
         sdk: `${this.#_libraryName}@${this.#_libraryVersion}`,
         user_agent: navigator.userAgent,
       },
-      event: 'lead',
-      properties: {},
-      user: {},
       sent_at: new Date().toISOString(),
     };
+
+    // @todo - handle consent: {} object.
 
     // Remove any properties that are not in snake_case via regex match
     Object.keys(properties).forEach(key => {
@@ -474,6 +472,9 @@ export default class CampaignCollector
       if (! userData[field]) 
         return;
 
+      if (! payload.hasOwnProperty('user'))
+        payload.user = {};
+
       payload.user[field] = userData[field].trim().toLowerCase();
 
       if (field === 'email')
@@ -483,7 +484,9 @@ export default class CampaignCollector
     });
 
     // Whatever remains are sent as custom properties
-    payload.properties = properties;
+
+    if (properties.keys.length > 0)
+      payload.properties = properties;
     
     this.#send(`https://${this.#config.firstPartyLeadEndpoint}`, payload);
   }
