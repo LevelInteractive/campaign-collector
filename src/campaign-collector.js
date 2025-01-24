@@ -3,7 +3,7 @@ export default class CampaignCollector
   #_libraryName = 'CampaignCollector';
   #_libraryVersion = '1.0.0';
 
-  #clientId;
+  #anonymousId;
 
   /**
    * The configuration object.
@@ -24,7 +24,7 @@ export default class CampaignCollector
     decorateHostnames: [],
     enableSpaSupport: false,
     fieldMap: {
-      client_id: '$ns_client_id',
+      anonymous_id: '$ns_anonymous_id',
       json: '$ns_attribution_json',
       first: {
         utm: null,
@@ -202,7 +202,7 @@ export default class CampaignCollector
 
     this.#resolveCookieDomain();
 
-    this.#setClientId();
+    this.#setAnonymousId();
 
     this.#setReferrer();
     this.#setParamAllowList();
@@ -314,7 +314,7 @@ export default class CampaignCollector
         if (inputs) {
 
           const values = {
-            client_id: this.#clientId,
+            anonymous_id: this.#anonymousId,
             json: this.grab({
               asJson: true,
               without: ['params']
@@ -350,18 +350,18 @@ export default class CampaignCollector
     }
   }
 
-  #setClientId() 
+  #setAnonymousId() 
   {
-    const storageName = `_${this.#config.storageNamespace}_cid`;
-    this.#clientId = this.#getCookie(storageName);
+    const storageName = `_${this.#config.storageNamespace}_anonymous_id`;
+    this.#anonymousId = this.#getCookie(storageName);
 
-    if (! this.#clientId)
-      this.#clientId = `CC.1.${Date.now()}.${Math.floor(Math.random() * Number.MAX_SAFE_INTEGER)}`;
+    if (! this.#anonymousId)
+      this.#anonymousId = `CC.1.${Date.now()}.${Math.floor(Math.random() * Number.MAX_SAFE_INTEGER)}`;
 
     if (this.#config.storageMethod === 'cookie') {
-      document.cookie = `${storageName}=${this.#clientId}; max-age=${this.#getSecondsFor({value: 400, units: 'days'})}; path=/; domain=${this.#config.cookieDomain}; secure`;
+      document.cookie = `${storageName}=${this.#anonymousId}; max-age=${this.#getSecondsFor({value: 400, units: 'days'})}; path=/; domain=${this.#config.cookieDomain}; secure`;
     } else { 
-      localStorage.setItem(storageName, this.#clientId);
+      localStorage.setItem(storageName, this.#anonymousId);
     }
   }
 
@@ -383,8 +383,8 @@ export default class CampaignCollector
   {
     const output = {};
 
-    if (! without.includes('client_id'))
-      output.client_id = this.#clientId;
+    if (! without.includes('anonymous_id'))
+      output.anonymous_id = this.#anonymousId;
 
     if (! without.includes('params'))
       output.params = this.#params;
@@ -429,38 +429,36 @@ export default class CampaignCollector
       throw new Error('`firstPartyLeadEndpoint` is required to send lead payload.');
 
     let payload = {
-      meta: {
-        client_id: this.#clientId,
-        timestamp: Date.now(),
-        screen: [screen.width, screen.height],
-        viewport: [innerWidth, innerHeight],
-        language: navigator.language,
+      anonymous_id: this.#anonymousId,
+      consent: {},
+      context: {
+        attribution: this.grab({
+          without: ['anonymous_id', 'params', 'globals']
+        }),
+        locale: navigator.language,
+        page: {
+          title: document.title,
+          url: location.href,
+        },
+        screen: {
+          width: screen.width,
+          height: screen.height,
+          inner_width: innerWidth,
+          inner_height: innerHeight,
+        },
+        sdk: `${this.#_libraryName}@${this.#_libraryVersion}`,
         user_agent: navigator.userAgent,
-        via: `${this.#_libraryName}@${this.#_libraryVersion}`,
       },
-      user: {},
+      event: 'lead',
       properties: {},
-      attribution: this.grab({
-        without: ['client_id', 'params']
-      })
+      user: {},
+      sent_at: new Date().toISOString(),
     };
 
     // Remove any properties that are not in snake_case via regex match
     Object.keys(properties).forEach(key => {
       if (! /^[a-z_]+$/.test(key))
         delete properties[key];
-    });
-
-    // There are a few properties that we send as meta if present
-    [
-      'form_id',
-      'form_name',
-      'form_provider',
-    ].forEach(field => {
-      if (properties[field]) 
-        payload.meta[field] = this.#sanitizeString(properties[field]);
-
-      delete properties[field];
     });
 
     [
@@ -492,15 +490,13 @@ export default class CampaignCollector
 
   async #send(endpoint, payload)
   {
-    console.log(payload);
-
     if (Object.keys(payload.user).length === 0) {
-      navigator.sendBeacon(endpoint, btoa(JSON.stringify(payload)));
-      // fetch(endpoint, {
-      //   method: 'POST',
-      //   body: btoa(JSON.stringify(payload)),
-      //   keepalive: true,
-      // });
+      // navigator.sendBeacon(endpoint, btoa(JSON.stringify(payload)));
+      fetch(endpoint, {
+        method: 'POST',
+        body: btoa(JSON.stringify(payload)),
+        keepalive: true,
+      });
       return;
     }
 
@@ -534,17 +530,19 @@ export default class CampaignCollector
         ];
       },
       city: (value) => value.replace(/[^a-z]/g, ''),
-      region: (value) => (value.length !== 2) ? null : value,
-      country: (value) => (value.length !== 2) ? null : value,
     };
     
     const processedEntries = await Promise.all(
       Object.entries(payload.user)
         .map(async ([field, value]) => {
-          if (!value) return null;
+          
+          if (! value) 
+            return null;
 
           let processedValue = transforms[field] ? transforms[field](value) : value;
-          if (!processedValue) return null;
+
+          if (! processedValue) 
+            return null;
 
           if (Array.isArray(processedValue)) {
             const hashedArray = await Promise.all(
@@ -567,13 +565,13 @@ export default class CampaignCollector
       payload.user = {};
     }
 
-    // fetch(endpoint, {
-    //   method: 'POST',
-    //   body: btoa(JSON.stringify(payload)),
-    //   keepalive: true,
-    // });
+    fetch(endpoint, {
+      method: 'POST',
+      body: btoa(JSON.stringify(payload)),
+      keepalive: true,
+    });
     
-    navigator.sendBeacon(endpoint, btoa(JSON.stringify(payload)));
+    // navigator.sendBeacon(endpoint, btoa(JSON.stringify(payload)));
   }
 
   /**
