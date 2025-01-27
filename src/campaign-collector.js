@@ -20,12 +20,18 @@ export default class CampaignCollector
    * @type {Object}
    */
   #defaults = {
-    cookieDomain: null,
+    consent: {
+      ad_personalization: null,
+      ad_storage: null,
+      ad_user_data: null,
+      analytics_storage: null,
+    },
     decorateHostnames: [],
     enableSpaSupport: false,
     fieldMap: {
-      anonymous_id: '$ns_anonymous_id',
-      json: '$ns_attribution_json',
+      anonymous_id: 'anonymous_id',
+      json: 'attribution_json',
+      consent: 'consent_json',
       first: {
         utm: null,
         $ns: null,
@@ -69,9 +75,10 @@ export default class CampaignCollector
         quora: '^www\.(quora)\.com$',
       }
     },
-    reportAnomalies: false,
+    plugins: [],
     sdk: null,
     sessionTimeout: null,
+    storageDomain: null,
     storageMethod: 'cookie', // anything other than 'cookie' will default to 'local'
     storageNamespace: 'cc',
     storeAsBase64: true,
@@ -132,6 +139,11 @@ export default class CampaignCollector
     $ns: ['platform', 'campaign', 'group', 'ad'],
   };
 
+  #pluginAllowList = [
+    'onetrust',
+    'cookiebot',
+  ];
+
   /**
    * Stores the referrer URL as a URL object.
    * 
@@ -185,6 +197,7 @@ export default class CampaignCollector
     return [
       'fill',
       'grab',
+      'lead',
     ].reduce((acc, key) => {
       acc[key] = instance[key].bind(instance);
       return acc;
@@ -193,15 +206,17 @@ export default class CampaignCollector
 
   constructor(config = {})
   {
-    //console.time(this.#_libraryName);
+    console.time(this.#_libraryName);
 
     this.#url = new URL(window.location.href);
     this.#config = this.#deepMerge(this.#defaults, config);
+
+    this.#asyncLoadPlugins();
     
     this.#setNamespace();
     this.#setFieldMap();
 
-    this.#resolveCookieDomain();
+    this.#resolveStorageDomain();
 
     this.#setAnonymousId();
 
@@ -228,7 +243,22 @@ export default class CampaignCollector
       });
     }
 
-    //console.timeEnd(this.#_libraryName);
+    console.timeEnd(this.#_libraryName);
+  }
+
+  #asyncLoadPlugins()
+  {
+    this.#config.plugins.forEach(plugin => {
+      if (! this.#pluginAllowList.includes(plugin))
+        return;
+
+
+
+      // load a plugin async via script tag
+
+
+    
+    });
   }
 
   /**
@@ -316,6 +346,7 @@ export default class CampaignCollector
 
           const values = {
             anonymous_id: this.#anonymousId,
+            consent: JSON.stringify(this.#config.consent),
             json: this.grab({
               asJson: true,
               without: ['params']
@@ -360,7 +391,7 @@ export default class CampaignCollector
       this.#anonymousId = `CC.1.${Date.now()}.${Math.floor(Math.random() * Number.MAX_SAFE_INTEGER)}`;
 
     if (this.#config.storageMethod === 'cookie') {
-      document.cookie = `${storageName}=${this.#anonymousId}; max-age=${this.#getSecondsFor({value: 400, units: 'days'})}; path=/; domain=${this.#config.cookieDomain}; secure`;
+      document.cookie = `${storageName}=${this.#anonymousId}; max-age=${this.#getSecondsFor({value: 400, units: 'days'})}; path=/; domain=${this.#config.storageDomain}; secure`;
     } else { 
       localStorage.setItem(storageName, this.#anonymousId);
     }
@@ -490,9 +521,6 @@ export default class CampaignCollector
 
       payload.user[field] = userData[field].trim().toLowerCase();
 
-      if (field === 'email')
-        payload.user.email_domain = userData[field].split('@')[1];
-
       delete userData[field];
     });
 
@@ -514,6 +542,12 @@ export default class CampaignCollector
       ];
 
       const transforms = {
+        first_name: (value) => value.replace(/[^a-z]/g, ''),
+        last_name: (value) => value.replace(/[^a-z]/g, ''),
+        email: (value) => {
+          payload.user.email_domain = value.split('@')[1];
+          return value;
+        },
         phone: (value) => {
           value = value.replace(/[^0-9]/g, '');
 
@@ -526,12 +560,23 @@ export default class CampaignCollector
 
           value = value.length === 10 ? `1${value}` : `${value}`;
 
+          payload.user.phone_area_code = value.substring(1, 3);
+
           return [
             value,
             `+${value}`,
           ];
         },
         city: (value) => value.replace(/[^a-z]/g, ''),
+        postal_code: (value) => value.replace(/[^0-9]/g, '').substring(0, 5),
+        date_of_birth: (value) => {
+          const date = new Date(value);
+          // calculate age
+          const MS_PER_YEAR = 1000 * 60 * 60 * 24 * 365.25;
+          payload.user.age = `${Math.floor((new Date() - date) / MS_PER_YEAR)}`;
+          return date.toISOString().split('T')[0].replace('-', '');
+        },
+        gender: (value) => value.substring(0, 1),
       };
       
       const processedEntries = await Promise.all(
@@ -941,9 +986,9 @@ export default class CampaignCollector
   {
     let parsed = {};
 
-    // If the referrer hostname is empty or is the on same root domain as the cookieDomain then we can only assume its direct
+    // If the referrer hostname is empty or is the on same root domain as the storageDomain then we can only assume its direct
     // @CONSIDER: use referral exclusion config parameter if cross-site
-    if (! this.#referrer || (this.#referrer.hostname.indexOf(this.#config.cookieDomain) > -1)) 
+    if (! this.#referrer || (this.#referrer.hostname.indexOf(this.#config.storageDomain) > -1)) 
       return parsed;
 
     parsed = {
@@ -974,13 +1019,13 @@ export default class CampaignCollector
   }
 
   /**
-   * Extracts the domain from the current hostname and sets it as `config.cookieDomain` if not already set in the config.
+   * Extracts the domain from the current hostname and sets it as `config.storageDomain` if not already set in the config.
    * 
    * @returns {void}
    */
-  #resolveCookieDomain()
+  #resolveStorageDomain()
   {
-    if (this.#config.cookieDomain) 
+    if (this.#config.storageDomain) 
       return;
 
     const hostname = this.#url.hostname;
@@ -996,7 +1041,7 @@ export default class CampaignCollector
     if (domainParts.length > 2 && domainParts[1].length <= 3)
       rootDomain = [domainParts[2], rootDomain].join('.');
 
-    this.#config.cookieDomain = rootDomain;
+    this.#config.storageDomain = rootDomain;
   }
 
   /**
@@ -1208,7 +1253,7 @@ export default class CampaignCollector
     this.#sessions[touchpoint] = null;
     
     if (this.#config.storageMethod === 'cookie') {
-      document.cookie = `${key}=; max-age=0; path=/; domain=${this.#config.cookieDomain}`;
+      document.cookie = `${key}=; max-age=0; path=/; domain=${this.#config.storageDomain}`;
     } else { 
       localStorage.removeItem(key); 
     }
@@ -1288,7 +1333,7 @@ export default class CampaignCollector
     const key = this.#storageKey(touchpoint);
 
     if (this.#config.storageMethod === 'cookie') {
-      document.cookie = `${key}=${value}; max-age=${maxAge}; path=/; domain=${this.#config.cookieDomain}; secure`;
+      document.cookie = `${key}=${value}; max-age=${maxAge}; path=/; domain=${this.#config.storageDomain}; secure`;
     } else { 
       localStorage.setItem(key, value);
     }
