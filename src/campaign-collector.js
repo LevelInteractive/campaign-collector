@@ -26,12 +26,13 @@ export default class CampaignCollector
       ad_user_data: null,
       analytics_storage: null,
     },
+    debug: false,
     decorateHostnames: [],
     enableSpaSupport: false,
     fieldMap: {
-      anonymous_id: 'anonymous_id',
-      json: 'attribution_json',
-      consent: 'consent_json',
+      anonymous_id: '$ns_anonymous_id',
+      json: '$ns_attribution_json',
+      consent: '$ns_consent_json',
       first: {
         utm: null,
         $ns: null,
@@ -176,34 +177,6 @@ export default class CampaignCollector
 
   #url;
 
-  /**
-   * This is a factory method that returns an object with the grab and fill methods.
-   * The only reason this exists is for compatibility with Google Tag Managers, sandboxed JS 
-   * "callInWindow" method, which can only call functions that are properties of an object.
-   * GTM's sandboxed JS doens't support native ES6 classes (stupid - I know).
-   * 
-   * DO NOT USE THIS OUTSIDE A GTM TEMPLATE CONTEXT.
-   * 
-   * @param {Object} config - The configuration object for the instance being created.
-   * @param {string} globalName - The global variable (e.g. window) to assign the instance to.
-   */
-  static create(config = {}, globalName = null)
-  {
-    const instance = new CampaignCollector(config);
-
-    if (globalName && ! window.hasOwnProperty(globalName))
-      window[globalName] = instance;
-
-    return [
-      'fill',
-      'grab',
-      'lead',
-    ].reduce((acc, key) => {
-      acc[key] = instance[key].bind(instance);
-      return acc;
-    }, {});
-  }
-
   constructor(config = {})
   {
     console.time(this.#_libraryName);
@@ -235,7 +208,7 @@ export default class CampaignCollector
 
     if (window.dataLayer) {
       window.dataLayer.push({ 
-        event: 'lvl.campaign-collector:ready', 
+        event: 'campaign-collector:ready', 
         campaign: this.grab({
           applyFilters: true,
           without: ['globals']
@@ -243,7 +216,39 @@ export default class CampaignCollector
       });
     }
 
+    if (this.#config.debug)
+      console.log(this.#config);
+
     console.timeEnd(this.#_libraryName);
+  }
+
+  /**
+   * This is a factory method that returns an object with the grab and fill methods.
+   * The only reason this exists is for compatibility with Google Tag Managers, sandboxed JS 
+   * "callInWindow" method, which can only call functions that are properties of an object.
+   * GTM's sandboxed JS doens't support native ES6 classes (stupid - I know).
+   * 
+   * DO NOT USE THIS OUTSIDE A GTM TEMPLATE CONTEXT.
+   * 
+   * @param {Object} config - The configuration object for the instance being created.
+   * @param {string} globalName - The global variable (e.g. window) to assign the instance to.
+   */
+  static create(config = {}, globalName = null)
+  {
+    const instance = new CampaignCollector(config);
+
+    if (globalName && ! window.hasOwnProperty(globalName))
+      window[globalName] = instance;
+
+    return [
+      'fill',
+      'grab',
+      'lead',
+      'updateConsent'
+    ].reduce((acc, key) => {
+      acc[key] = instance[key].bind(instance);
+      return acc;
+    }, {});
   }
 
   #asyncLoadPlugins()
@@ -287,7 +292,7 @@ export default class CampaignCollector
       if (! reference)
         return session;
 
-      session.lvl = reference.lvl;
+      session[this.#config.namespace] = reference[this.#config.namespace];
       session.utm = reference.utm;
     }
 
@@ -322,7 +327,8 @@ export default class CampaignCollector
     const fieldMap = this.#deepCopy(this.#config.fieldMap);
 
     const data = this.grab({
-      without: ['params']
+      without: ['params'],
+      dereference: true
     });
 
     ['first', 'last'].forEach(touchpoint => {
@@ -339,7 +345,7 @@ export default class CampaignCollector
 
       if (typeof fields === 'string') {
 
-        let selectorString = fields.replace('$ns', this.#config.namespace);
+        let selectorString = fields.replace('$ns', this.#config.storageNamespace);
         const inputs = query.scope.querySelectorAll(this.#makeSelectorString(query.targetMethod, selectorString));
 
         if (inputs) {
@@ -371,7 +377,10 @@ export default class CampaignCollector
         if (! inputs?.length) 
           continue;
 
-        const value = data[group][key] ?? '-';
+        let value = data[group][key] ?? '-';
+
+        if (['cookies', 'globals'].includes(group))
+          value = this.#applyFilter(this.#config.filters[key], value);
 
         Array.from(inputs).forEach(input => {
           input.value = value;
@@ -410,10 +419,13 @@ export default class CampaignCollector
   grab({
     applyFilters = false,
     asJson = false,
+    dereference = false,
     without = [],
   } = {})
   {
-    const output = {};
+    const output = {
+      namespace: this.#config.namespace,
+    };
 
     if (! without.includes('anonymous_id'))
       output.anonymous_id = this.#anonymousId;
@@ -424,8 +436,12 @@ export default class CampaignCollector
     if (! without.includes('first'))
       output.first = this.#sessions.first;
 
-    if (! without.includes('last'))
+    if (! without.includes('last')) {
       output.last = this.#sessions.last;
+
+      if (dereference && this.#sessions.last._ref)
+        output.last = Object.assign(this.#sessions[this.#sessions.last._ref], output.last);
+    }
 
     if (! without.includes('globals'))
       output.globals = this.#collectGlobals({ applyFilters });
@@ -462,6 +478,8 @@ export default class CampaignCollector
 
     let payload = {
       anonymous_id: this.#anonymousId,
+      sent_at: new Date().getTime(),
+      event: 'lead',
       context: {
         attribution: this.grab({
           without: ['anonymous_id', 'params', 'globals']
@@ -480,7 +498,6 @@ export default class CampaignCollector
         sdk: `${this.#_libraryName}@${this.#_libraryVersion}`,
         user_agent: navigator.userAgent,
       },
-      sent_at: new Date().toISOString(),
     };
 
     if (this.#config.sdk)
@@ -541,11 +558,14 @@ export default class CampaignCollector
         'gender',
       ];
 
+      // Exractions
+      const extracted = {};
+
       const transforms = {
         first_name: (value) => value.replace(/[^a-z]/g, ''),
         last_name: (value) => value.replace(/[^a-z]/g, ''),
         email: (value) => {
-          payload.user.email_domain = value.split('@')[1];
+          extracted.email_domain = value.split('@')[1];
           return value;
         },
         phone: (value) => {
@@ -560,7 +580,7 @@ export default class CampaignCollector
 
           value = value.length === 10 ? `1${value}` : `${value}`;
 
-          payload.user.phone_area_code = value.substring(1, 3);
+          extracted.phone_area_code = value.substring(1, 3);
 
           return [
             value,
@@ -607,7 +627,7 @@ export default class CampaignCollector
       // Filter out null entries and create new user object
       const validEntries = processedEntries.filter(entry => entry !== null);
       if (validEntries.length > 0) {
-        payload.user = Object.fromEntries(validEntries);
+        payload.user = Object.assign(Object.fromEntries(validEntries), extracted);
       } else {
         payload.user = {};
       }
@@ -663,7 +683,6 @@ export default class CampaignCollector
     });
   }
 
-
   /**
    * Checks if the expected parameters are present for a given parameter namespace.
    * 
@@ -690,6 +709,23 @@ export default class CampaignCollector
     return true;
   }
 
+  #applyFilter(filter, value)
+  {
+    if (typeof filter !== 'function')
+      return value;
+
+    try {
+      value = filter(value);
+    } catch (e) {
+      console.error(
+        `${this.#_libraryName}.js: Error applying filter.`,
+        e.message
+      );
+    }
+
+    return value;
+  }
+
   /**
    * Collects cookies based on the `fieldMap.cookies` configuration.
    * 
@@ -713,16 +749,8 @@ export default class CampaignCollector
       if (! value)
         continue;
 
-      if (applyFilters && typeof this.#config.filters[cookieName] === 'function') {
-        try {
-          value = this.#config.filters[cookieName](value);
-        } catch (e) {
-          console.error(
-            `${this.#_libraryName}.js: Error applying filter to cookie "${cookieName}"`,
-            e.message
-          );
-        }
-      }
+      if (applyFilters) 
+        value = this.#applyFilter(this.#config.filters[cookieName], value);
 
       cookies[cookieName] = value;
       
@@ -752,8 +780,8 @@ export default class CampaignCollector
         if (! value)
           continue;
 
-        if (applyFilters && typeof this.#config.filters[path] === 'function')
-          value = this.#config.filters[path](value);
+        if (applyFilters)
+          value = this.#applyFilter(this.#config.filters[path], value);
 
         globals[path] = value;
       } catch(e){
@@ -927,7 +955,7 @@ export default class CampaignCollector
     if (! hasExpectedUtms && ! hasExpectedCustom)
       Object.assign(data.utm, this.#parseReferrer());
 
-    if (this.#sessions?.first) {
+    if (this.#sessions?.first) { 
       // console.log('first touchpoint exists');
       // If the last touch session cookie has expired - or if the current parsed session source is not direct - the last touch session 
       // cookie should be set to the latest parsed data.
@@ -1368,4 +1396,19 @@ export default class CampaignCollector
   {
     return `_${this.#config.storageNamespace}_${touchpoint}`;
   }  
+
+  updateConsent(key, value)
+  {
+    if (! this.#defaults.consent.hasOwnProperty(key))
+      throw new Error(`Invalid consent key: "${key}". Allowed keys are "${Object.keys(this.#defaults.consent).join('", "')}".`);
+
+    const allowedValues = ['granted', 'denied', null];
+
+    if (! allowedValues.includes(value))
+      throw new Error('Invalid consent value. Allowed values are "granted", "denied", or null.');
+
+    this.#config.consent[key] = value ? value.toLowerCase() : null;
+
+    console.log(this.#config.consent);
+  }
 }
