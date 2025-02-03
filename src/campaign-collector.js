@@ -237,8 +237,10 @@ export default class CampaignCollector
   {
     const instance = new CampaignCollector(config);
 
-    if (globalName && ! window.hasOwnProperty(globalName))
-      window[globalName] = instance;
+    window._campaignCollector = window._campaignCollector || {};
+
+    if (globalName && ! window._campaignCollector.hasOwnProperty(globalName))
+      window._campaignCollector[globalName] = instance;
 
     return [
       'fill',
