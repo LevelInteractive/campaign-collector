@@ -31,7 +31,7 @@ export default class CampaignCollector
     enableSpaSupport: false,
     fieldMap: {
       anonymous_id: '$ns_anonymous_id',
-      json: '$ns_attribution_json',
+      attribution: '$ns_attribution_json',
       consent: '$ns_consent_json',
       first: {
         utm: null,
@@ -203,7 +203,7 @@ export default class CampaignCollector
     this.#sessions = this.#sessionGetAll();
     this.#maybeUpdateSession();
 
-    this.fill();
+    // this.fill();
     this.#bindListeners();
 
     if (window.dataLayer) {
@@ -306,6 +306,11 @@ export default class CampaignCollector
     return this.#paramAllowList;
   }
 
+  get anonymousId()
+  {
+    return this.#checkConsent('analytics_storage') ? this.#anonymousId : '(redacted)';
+  }
+
   /**
    * Fills form inputs with campaign data based on the config `fieldMap`, and `fieldTargetMethod`.
    * Accepts an optional settings parameter to override the default config values `fieldTargetMethod` , and `scope`.
@@ -353,9 +358,9 @@ export default class CampaignCollector
         if (inputs) {
 
           const values = {
-            anonymous_id: this.#anonymousId,
+            anonymous_id: this.anonymousId,
             consent: JSON.stringify(this.#config.consent),
-            json: this.grab({
+            attribution: this.grab({
               asJson: true,
               without: ['params']
             }),
@@ -393,21 +398,6 @@ export default class CampaignCollector
     }
   }
 
-  #setAnonymousId() 
-  {
-    const storageName = `_${this.#config.storageNamespace}_anonymous_id`;
-    this.#anonymousId = this.#getCookie(storageName);
-
-    if (! this.#anonymousId)
-      this.#anonymousId = `CC.1.${Date.now()}.${Math.floor(Math.random() * Number.MAX_SAFE_INTEGER)}`;
-
-    if (this.#config.storageMethod === 'cookie') {
-      document.cookie = `${storageName}=${this.#anonymousId}; max-age=${this.#getSecondsFor({value: 400, units: 'days'})}; path=/; domain=${this.#config.storageDomain}; secure`;
-    } else { 
-      localStorage.setItem(storageName, this.#anonymousId);
-    }
-  }
-
   /**
    * Returns the campaign data object.
    * 
@@ -430,7 +420,7 @@ export default class CampaignCollector
     };
 
     if (! without.includes('anonymous_id'))
-      output.anonymous_id = this.#anonymousId;
+      output.anonymous_id = this.anonymousId;
 
     if (! without.includes('params'))
       output.params = this.#params;
@@ -449,7 +439,7 @@ export default class CampaignCollector
       output.globals = this.#collectGlobals({ applyFilters });
 
     if (! without.includes('cookies'))
-      output.cookies = this.#collectCookies({ applyFilters });
+      output.cookies = this.#checkConsent('ad_user_data') ? this.#collectCookies({ applyFilters }) : {};
 
     return asJson ? JSON.stringify(output) : output;
   }
@@ -683,6 +673,34 @@ export default class CampaignCollector
         this.#sessionHydrate();
       });
     });
+
+    // const ns = this.#toKebabCase(this.#_libraryName);
+
+    // document.addEventListener(`${ns}:ad_storage.denied`, (e) => {
+    //   console.log('ad_storage.denied', e);
+    // });
+
+    // document.addEventListener(`${ns}:ad_user_data.denied`, (e) => {
+    //   console.log('ad_user_data.denied', e);
+    // });
+
+    // document.addEventListener(`${ns}:analytics_storage.denied`, (e) => {
+    //   console.log('analytics_storage.denied', e);
+    // });
+
+    // document.addEventListener(`${ns}:ad_personalization.denied`, (e) => {
+    //   console.log('ad_personalization.denied', e);
+    // });
+  }
+
+  #checkConsent(type)
+  {
+    return {
+      'granted': true,
+      'denied': false,
+      'null': true,
+      null: true,
+    }[this.#config.consent[type]];
   }
 
   /**
@@ -1144,6 +1162,21 @@ export default class CampaignCollector
     return data;
   }
 
+  #setAnonymousId() 
+  {
+    const storageName = `_${this.#config.storageNamespace}_anonymous_id`;
+    this.#anonymousId = this.#getCookie(storageName);
+
+    if (! this.#anonymousId)
+      this.#anonymousId = `CC.1.${Date.now()}.${Math.floor(Math.random() * Number.MAX_SAFE_INTEGER)}`;
+
+    if (this.#config.storageMethod === 'cookie') {
+      document.cookie = `${storageName}=${this.#anonymousId}; max-age=${this.#getSecondsFor({value: 400, units: 'days'})}; path=/; domain=${this.#config.storageDomain}; secure`;
+    } else { 
+      localStorage.setItem(storageName, this.#anonymousId);
+    }
+  }
+
   /**
    * Merges the default `config.fieldMap` values with the instance-defined `config.fieldMap` values.
    * 
@@ -1399,18 +1432,27 @@ export default class CampaignCollector
     return `_${this.#config.storageNamespace}_${touchpoint}`;
   }  
 
+  #toKebabCase(value)
+  {
+    return value.replace(/([a-z])([A-Z])/g, '$1-$2').toLowerCase();
+  }
+
   updateConsent(key, value)
   {
     if (! this.#defaults.consent.hasOwnProperty(key))
-      throw new Error(`Invalid consent key: "${key}". Allowed keys are "${Object.keys(this.#defaults.consent).join('", "')}".`);
+      throw new Error(`Invalid consent key.`);
 
     const allowedValues = ['granted', 'denied', null];
 
     if (! allowedValues.includes(value))
-      throw new Error('Invalid consent value. Allowed values are "granted", "denied", or null.');
+      throw new Error('Invalid consent value. Must be "granted", "denied", or null.');
 
     this.#config.consent[key] = value ? value.toLowerCase() : null;
 
-    console.log(this.#config.consent);
+    document.dispatchEvent(
+      new Event(`${this.#toKebabCase(this.#_libraryName)}:${key}.${value}`, {
+        bubbles: true 
+      })
+    );
   }
 }
