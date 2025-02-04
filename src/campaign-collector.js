@@ -208,7 +208,7 @@ export default class CampaignCollector
 
     if (window.dataLayer) {
       window.dataLayer.push({ 
-        event: 'campaign-collector:ready', 
+        event: `${this.#toKebabCase(this.#_libraryName)}:ready`, 
         campaign: this.grab({
           applyFilters: true,
           without: ['globals']
@@ -246,11 +246,50 @@ export default class CampaignCollector
       'fill',
       'grab',
       'lead',
-      'updateConsent'
+      'debug',
     ].reduce((acc, key) => {
       acc[key] = instance[key].bind(instance);
       return acc;
     }, {});
+  }
+
+  static consentChange(type, status)
+  {
+    if (! [
+      'ad_storage',
+      'ad_user_data',
+      'analytics_storage',
+      'ad_personalization'
+    ].includes(type))
+      throw new Error(`Invalid consent key.`);
+
+    if (! [
+      'granted', 
+      'denied', 
+      null
+    ].includes(status))
+      throw new Error('Invalid consent value. Must be "granted", "denied", or null.');
+
+    const ns = 'campaign-collector';
+
+    // Generic event for all consent changes.
+    document.dispatchEvent(
+      new CustomEvent(`${ns}:consent.change`, {
+        detail: {
+          type,
+          status
+        },
+        bubbles: true 
+      })
+    );
+
+    // Specific events for each consent type for easier use.
+    // e.g. campaign-collector:ad_storage.denied 
+    document.dispatchEvent(
+      new Event(`${ns}:${type}.${status}`, {
+        bubbles: true 
+      })
+    );
   }
 
   #asyncLoadPlugins()
@@ -308,7 +347,12 @@ export default class CampaignCollector
 
   get anonymousId()
   {
-    return this.#checkConsent('analytics_storage') ? this.#anonymousId : '(redacted)';
+    return this.#consentCheck('analytics_storage') ? this.#anonymousId : '(redacted)';
+  }
+
+  debug()
+  {
+    console.log(this.#config);
   }
 
   /**
@@ -439,7 +483,7 @@ export default class CampaignCollector
       output.globals = this.#collectGlobals({ applyFilters });
 
     if (! without.includes('cookies'))
-      output.cookies = this.#checkConsent('ad_user_data') ? this.#collectCookies({ applyFilters }) : {};
+      output.cookies = this.#consentCheck('ad_user_data') ? this.#collectCookies({ applyFilters }) : {};
 
     return asJson ? JSON.stringify(output) : output;
   }
@@ -635,6 +679,23 @@ export default class CampaignCollector
     // navigator.sendBeacon(endpoint, btoa(JSON.stringify(payload)));
   }
 
+  #applyFilter(filter, value)
+  {
+    if (typeof filter !== 'function')
+      return value;
+
+    try {
+      value = filter(value);
+    } catch (e) {
+      console.error(
+        `${this.#_libraryName}.js: Error applying filter.`,
+        e.message
+      );
+    }
+
+    return value;
+  }
+
   /**
    * Binds event listeners to the document to handle input field population and session hydration, and history state changes.
    * 
@@ -654,18 +715,34 @@ export default class CampaignCollector
       window.onpopstate = history.onpushstate = handleSpaNavigation;
     }
 
-    const deferredFill = (e) => {
-      // if (! e.target.matches('[type="submit"]'))
-      //   return;
-
-      const form = e.target.closest('form');
-
-      if (! form)
-        return;
+    const debounce = (func, wait) => {
+      let timeout;
+      let isFirst = true;
+      
+      return function executedFunction(...args) {
+        if (isFirst) {
+          isFirst = false;
+          func(...args);
+          return;
+        }
         
-      this.fill(form);
-
+        const later = () => {
+          clearTimeout(timeout);
+          func(...args);
+        };
+        
+        clearTimeout(timeout);
+        timeout = setTimeout(later, wait);
+      };
     };
+
+    const deferredFill = debounce((e) => {
+      const form = e.target.closest('form');
+      
+      if (! form) return;
+      
+      this.fill(form);
+    }, 1500);
 
     ['mousedown', 'touchstart'].forEach((event) => {
       document.addEventListener(event, (e) => {
@@ -674,11 +751,12 @@ export default class CampaignCollector
       });
     });
 
-    // const ns = this.#toKebabCase(this.#_libraryName);
+    const ns = this.#toKebabCase(this.#_libraryName);
 
-    // document.addEventListener(`${ns}:ad_storage.denied`, (e) => {
-    //   console.log('ad_storage.denied', e);
-    // });
+    document.addEventListener(`${ns}:consent.change`, (e) => {
+      const { type, status } = e.detail;
+      this.#consentUpdate(type, status);
+    });
 
     // document.addEventListener(`${ns}:ad_user_data.denied`, (e) => {
     //   console.log('ad_user_data.denied', e);
@@ -691,16 +769,6 @@ export default class CampaignCollector
     // document.addEventListener(`${ns}:ad_personalization.denied`, (e) => {
     //   console.log('ad_personalization.denied', e);
     // });
-  }
-
-  #checkConsent(type)
-  {
-    return {
-      'granted': true,
-      'denied': false,
-      'null': true,
-      null: true,
-    }[this.#config.consent[type]];
   }
 
   /**
@@ -727,23 +795,6 @@ export default class CampaignCollector
     }
 
     return true;
-  }
-
-  #applyFilter(filter, value)
-  {
-    if (typeof filter !== 'function')
-      return value;
-
-    try {
-      value = filter(value);
-    } catch (e) {
-      console.error(
-        `${this.#_libraryName}.js: Error applying filter.`,
-        e.message
-      );
-    }
-
-    return value;
   }
 
   /**
@@ -814,6 +865,21 @@ export default class CampaignCollector
     }
     
     return globals;
+  }
+
+  #consentCheck(type)
+  {
+    return {
+      'granted': true,
+      'denied': false,
+      'null': true,
+      null: true,
+    }[this.#config.consent[type]];
+  }
+
+  #consentUpdate(type, status)
+  {
+    this.#config.consent[type] = status ? status.toLowerCase() : null;
   }
 
   /**
@@ -1435,24 +1501,5 @@ export default class CampaignCollector
   #toKebabCase(value)
   {
     return value.replace(/([a-z])([A-Z])/g, '$1-$2').toLowerCase();
-  }
-
-  updateConsent(key, value)
-  {
-    if (! this.#defaults.consent.hasOwnProperty(key))
-      throw new Error(`Invalid consent key.`);
-
-    const allowedValues = ['granted', 'denied', null];
-
-    if (! allowedValues.includes(value))
-      throw new Error('Invalid consent value. Must be "granted", "denied", or null.');
-
-    this.#config.consent[key] = value ? value.toLowerCase() : null;
-
-    document.dispatchEvent(
-      new Event(`${this.#toKebabCase(this.#_libraryName)}:${key}.${value}`, {
-        bubbles: true 
-      })
-    );
   }
 }
