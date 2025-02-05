@@ -513,9 +513,10 @@ export default class CampaignCollector
       throw new Error('`firstPartyLeadEndpoint` is required to send lead payload.');
 
     let payload = {
-      anonymous_id: this.#anonymousId,
+      anonymous_id: this.anonymousId,
       sent_at: new Date().getTime(),
       event: 'lead',
+      consent: this.#config.consent,
       context: {
         attribution: this.grab({
           without: ['anonymous_id', 'params', 'globals']
@@ -616,7 +617,7 @@ export default class CampaignCollector
 
           value = value.length === 10 ? `1${value}` : `${value}`;
 
-          extracted.phone_area_code = value.substring(1, 3);
+          extracted.phone_area_code = value.substring(1, 4);
 
           return [
             value,
