@@ -525,6 +525,7 @@ export default class CampaignCollector
         page: {
           title: document.title,
           url: location.href,
+          referrer: document.referrer,
         },
         screen: {
           width: screen.width,
