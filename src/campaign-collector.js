@@ -76,7 +76,6 @@ export default class CampaignCollector
         quora: '^www\.(quora)\.com$',
       }
     },
-    plugins: [],
     sdk: null,
     sessionTimeout: null,
     storageDomain: null,
@@ -140,11 +139,6 @@ export default class CampaignCollector
     $ns: ['platform', 'campaign', 'group', 'ad'],
   };
 
-  #pluginAllowList = [
-    'onetrust',
-    'cookiebot',
-  ];
-
   /**
    * Stores the referrer URL as a URL object.
    * 
@@ -183,8 +177,6 @@ export default class CampaignCollector
 
     this.#url = new URL(window.location.href);
     this.#config = this.#deepMerge(this.#defaults, config);
-
-    this.#asyncLoadPlugins();
     
     this.#setNamespace();
     this.#setFieldMap();
@@ -290,21 +282,6 @@ export default class CampaignCollector
         bubbles: true 
       })
     );
-  }
-
-  #asyncLoadPlugins()
-  {
-    this.#config.plugins.forEach(plugin => {
-      if (! this.#pluginAllowList.includes(plugin))
-        return;
-
-
-
-      // load a plugin async via script tag
-
-
-    
-    });
   }
 
   /**
@@ -590,8 +567,8 @@ export default class CampaignCollector
         'last_name',
         'email',
         'phone',
-        'city',
-        'postal_code',
+        // 'city',
+        // 'postal_code',
         'date_of_birth',
         'gender',
       ];
@@ -618,12 +595,14 @@ export default class CampaignCollector
 
           value = value.length === 10 ? `1${value}` : `${value}`;
 
-          extracted.phone_area_code = value.substring(1, 4);
-
-          return [
+          const phones = [
             value,
             `+${value}`,
           ];
+
+          extracted.phone_area_code = value.substring(1, 4);
+          
+          return phones;
         },
         city: (value) => value.replace(/[^a-z]/g, ''),
         postal_code: (value) => value.replace(/[^0-9]/g, '').substring(0, 5),
