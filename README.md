@@ -5,7 +5,7 @@
 CampaignCollector is a small utility library that allows you to easily collect campaign parameters (`utm_` +) from a URL and store/persist them in browser storage. This is useful for integrating campaign data with lead generation forms and CRMs.
 
 > [!IMPORTANT]
-> This library does not send data to any analytics platform or 3rd party service. It is up to the implementor to decide how it is used.
+> This library does not send data to any analytics platform or 3rd party service by default. It is up to the implementor to decide how any collected data is used.
 
 **Features**
 
@@ -25,6 +25,8 @@ CampaignCollector is a small utility library that allows you to easily collect c
 For Google Tag Manager users - this is the preferred and easiest deployment method.
 
 Install the [Campaign Collector tag template](https://tagmanager.google.com/gallery/#/owners/#) in the community gallery. You can [view the tag template repository here](https://github.com/levelinteractive/campaign-collector-gtm).
+
+This method is also suggested for data-privacy compliance. This library is configured to react to changes in Google Consent Mode and will change the data that is caputred and/or stored based on the consent state of the user.
 
 #### Vanilla Javascript Loader
 
@@ -152,6 +154,9 @@ By default, the library will automatically generate a fieldMap for the `first` a
 
 ```json
 {
+  "anonymous_id": "my_anon_id",
+  "attribution": "my_attribution_json",
+  "consent": "my_consent_json",
   "last": {
     "utm": {
       "source": "utm_source__c",
@@ -171,6 +176,8 @@ By default, the library will automatically generate a fieldMap for the `first` a
 ```
 
 The above example defines a custom `fieldMap` for to take the last touch `utm_source`, and `lvl_matchtype` and map it to a field with a `name` attributes of `utm_source__c`, and `matchtype__c`. It instructs the library to grab the `_fbp` and `_fbc` cookies and map them to fields with `name` attributes of `meta__fbp` and `meta__fbc` respectively. Lastly, the `globals` object defines values to grab from the `window` object and map to fields with a `name` attribute of `conversion_url`.
+
+`anonymous_id`, `attribution`, and `consent` are special keys that are simple key:value pairs. `anonymous_id` is a string that represents the key to use for the anonymous ID cookie. `attribution` and `consent` are strings that represent the keys to use for the attribution and consent JSON string values sent into separate fields if desired.
 
 #### `fieldTargetMethod`
 

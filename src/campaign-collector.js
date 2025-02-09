@@ -82,6 +82,16 @@ export default class CampaignCollector
     storageMethod: 'cookie', // anything other than 'cookie' will default to 'local'
     storageNamespace: 'cc',
     storeAsBase64: true,
+    userDataHash: {
+      // Allows for graceful overrides of the default user data hashing behavior.
+      // However, the following keys will ALWAYS be hashed: first_name, last_name, email, phone, gender, date_of_birth
+      // The following user location values are sometimes used as reporting dimensions so these are "opt-in", for hashing. 
+      // This setting only matters if you have the tag configured to send data to a 1st party endpoint.
+      city: false,
+      region: false,
+      postal_code: false,
+      country: false,
+    },
   };
 
   #params = null;
@@ -535,6 +545,7 @@ export default class CampaignCollector
       payload.properties = properties;
     
     // User Data
+    // Ensures that only the allowed fields are sent anything else is dropped.
     [
       'first_name',
       'last_name',
@@ -544,6 +555,8 @@ export default class CampaignCollector
       'region',
       'postal_code',
       'country',
+      'date_of_birth',
+      'gender',
     ].forEach(field => {
       if (! userData[field]) 
         return;
@@ -562,18 +575,19 @@ export default class CampaignCollector
   async #send(endpoint, payload)
   {
     if (payload.user) {
+
       const willHash = [
-        'first_name',
-        'last_name',
-        'email',
-        'phone',
-        // 'city',
-        // 'postal_code',
-        'date_of_birth',
-        'gender',
+        ...Object.keys(this.#config.userDataHash).filter(key => this.#config.userDataHash[key]), 
+        ...[
+          'first_name',
+          'last_name',
+          'email',
+          'phone',
+          'date_of_birth',
+          'gender',
+        ]
       ];
 
-      // Exractions
       const extracted = {};
 
       const transforms = {
@@ -610,7 +624,7 @@ export default class CampaignCollector
           const date = new Date(value);
           // calculate age
           const MS_PER_YEAR = 1000 * 60 * 60 * 24 * 365.25;
-          payload.user.age = `${Math.floor((new Date() - date) / MS_PER_YEAR)}`;
+          extracted.age = `${Math.floor((new Date() - date) / MS_PER_YEAR)}`;
           return date.toISOString().split('T')[0].replace('-', '');
         },
         gender: (value) => value.substring(0, 1),
