@@ -594,8 +594,27 @@ export default class CampaignCollector
         first_name: (value) => value.replace(/[^a-z]/g, ''),
         last_name: (value) => value.replace(/[^a-z]/g, ''),
         email: (value) => {
-          extracted.email_domain = value.split('@')[1];
-          return value;
+          let [username, domain] = value.split('@');
+          extracted.email_domain = domain;
+
+          let values = [
+            value,
+          ];
+
+          if ([
+            'gmail.com',
+            'googlemail.com',
+          ].includes(domain)) {
+            // See: https://developers.google.com/google-ads/api/docs/conversions/enhanced-conversions/web#prepare-data
+            // Specifically: Remove all periods (.) that precede the domain name in gmail.com and googlemail.com email addresses.
+            username = username.replace(/\./g, '');
+            // Google doesn't explicitly state this - but we also remove any + characters and anything after it, as this is also ignored by Gmail.
+            // Basically: foo.bar+baz@gmail.com === foobar@gmail.com
+            username = username.split('+')[0];
+            values.push(username + '@' + domain);
+          };
+
+          return values;
         },
         phone: (value) => {
           value = value.replace(/[^0-9]/g, '');
@@ -664,6 +683,9 @@ export default class CampaignCollector
       }
 
     }
+
+    if (this.#config.debug)
+      console.log('Sending payload:', payload);
 
     fetch(endpoint, {
       method: 'POST',
