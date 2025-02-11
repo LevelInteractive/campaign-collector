@@ -183,6 +183,9 @@ export default class CampaignCollector
 
   constructor(config = {})
   {
+    if (! CampaignCollector.canRun())
+      return;
+
     console.time(this.#_libraryName);
 
     this.#url = new URL(window.location.href);
@@ -224,6 +227,12 @@ export default class CampaignCollector
     console.timeEnd(this.#_libraryName);
   }
 
+  static canRun() {
+    return typeof WeakMap !== 'undefined' && 
+           typeof URL !== 'undefined' && 
+           typeof localStorage !== 'undefined';
+  }
+
   /**
    * This is a factory method that returns an object with the grab and fill methods.
    * The only reason this exists is for compatibility with Google Tag Managers, sandboxed JS 
@@ -237,6 +246,9 @@ export default class CampaignCollector
    */
   static create(config = {}, globalName = null)
   {
+    if (! CampaignCollector.canRun())
+      return;
+
     const instance = new CampaignCollector(config);
 
     window._campaignCollector = window._campaignCollector || {};
@@ -308,20 +320,23 @@ export default class CampaignCollector
 
     const now = Math.ceil(Date.now() / 1000);
 
-    // This ensures that we don't return an expired session stored in memory.
-    if (session._exp < now) {
-      this.#sessionEnd('last');
-      this.#maybeUpdateSession();
-    }
+    // If session is expired, just return null instead of triggering an update
+    if (session._exp < now)
+      return null;
 
+    // If this is a reference-based session, resolve the reference
     if (session._ref) {
       const reference = this.#sessionGet(session._ref);
-
+      
       if (! reference)
         return session;
 
-      session[this.#config.namespace] = reference[this.#config.namespace];
-      session.utm = reference.utm;
+      // Create a new object instead of modifying the session
+      return {
+        ...session,
+        [this.#config.namespace]: reference[this.#config.namespace],
+        utm: reference.utm
+      };
     }
 
     return session;
@@ -1035,38 +1050,71 @@ export default class CampaignCollector
    */
   #maybeUpdateSession()
   {
-    const $ns = this.#config.namespace;
+    // First check if current session is expired and clear if needed
+    const session = this.#sessions.last;
+    if (session && session._exp < Math.ceil(Date.now() / 1000))
+      this.#sessionEnd('last');
 
+    const $ns = this.#config.namespace;
+    
     let data = {
       utm: {
         source: '(direct)',
         medium: '(none)'
       }
     };
-
+    
     data[$ns] = {};
 
+    // Check for expected parameters in current request
     const hasExpectedUtms = this.#checkExpectedParams('utm');
     const hasExpectedCustom = this.#checkExpectedParams($ns);
 
-    if (hasExpectedUtms)
-      Object.assign(data.utm, this.#params.utm);
+    // If we have expected parameters in the URL, always create new session
+    if (hasExpectedUtms || hasExpectedCustom) {
+      if (hasExpectedUtms)
+        Object.assign(data.utm, this.#params.utm);
+  
+      if (hasExpectedCustom)
+        Object.assign(data[$ns], this.#params[$ns]);
+    } else {
+      // No campaign parameters in URL - check active session quality
+      const activeSession = this.activeSession;
+      
+      // Helper function to check if a session has expected parameters
+      const hasExpectedSessionParams = (session, namespace) => {
+        if (! session || ! this.#paramsExpected[namespace]) 
+          return false;
+        
+        return this.#paramsExpected[namespace].every(param => 
+          session[namespace]?.[param] && 
+          // For UTM, also check if it's not the default direct/none
+          (!['utm'].includes(namespace) || 
+            (param === 'source' && session[namespace][param] !== '(direct)') ||
+            (param === 'medium' && session[namespace][param] !== '(none)')
+          )
+        );
+      };
 
-    if (hasExpectedCustom)
-      Object.assign(data[$ns], this.#params[$ns]);
+      // Check if active session has either complete UTM or custom parameters
+      const hasQualityUtmSession = hasExpectedSessionParams(activeSession, 'utm');
+      const hasQualityCustomSession = hasExpectedSessionParams(activeSession, $ns);
 
-    if (! hasExpectedUtms && ! hasExpectedCustom)
-      Object.assign(data.utm, this.#parseReferrer());
+      if (hasQualityUtmSession || hasQualityCustomSession) {
+        // Active session has required parameters - preserve it
+        data = activeSession;
+      } else {
+        // Active session doesn't have required parameters - try referrer parsing
+        Object.assign(data.utm, this.#parseReferrer());
+      }
+    }
 
     if (this.#sessions?.first) { 
-      // console.log('first touchpoint exists');
       // If the last touch session cookie has expired - or if the current parsed session source is not direct - the last touch session 
       // cookie should be set to the latest parsed data.
       // Otherwise the existing last touch data will be persisted until the next non-direct source is encountered.
-
-      data = (! this.#sessions.last || (data.utm.source !== '(direct)')) ? data : this.#sessions.last;
+      data = (!this.#sessions.last || (data.utm.source !== '(direct)')) ? data : this.#sessions.last;
     } else {
-      
       // With ITP and other cookie limitations - this cookie will often be capped to 7 days.
       // See: https://www.cookiestatus.com for latest info.
       // @TODO: Implement 1st party endpoint for Safari ITP 2.3+ to extend the session window.
@@ -1077,7 +1125,7 @@ export default class CampaignCollector
         _ref: 'first',
       };
     }
-  
+
     this.#sessions.last = data;
 
     // The last touch cookie should always be refreshed to ensure the session window is extended like in UA. 
