@@ -82,6 +82,7 @@ export default class CampaignCollector
     storageMethod: 'cookie', // anything other than 'cookie' will default to 'local'
     storageNamespace: 'cc',
     storeAsBase64: true,
+    stripUtmsFromInternalLinks: false,
     userDataHash: {
       // Allows for graceful overrides of the default user data hashing behavior.
       // However, the following keys will ALWAYS be hashed: first_name, last_name, email, phone, gender, date_of_birth
@@ -208,7 +209,7 @@ export default class CampaignCollector
     this.#sessions = this.#sessionGetAll();
     this.#maybeUpdateSession();
 
-    // this.fill();
+    this.fill();
     this.#bindListeners();
 
     if (window.dataLayer) {
@@ -430,12 +431,18 @@ export default class CampaignCollector
         if (! inputs?.length) 
           continue;
 
-        let value = data[group][key] ?? '-';
+        let nullValue = (['cookies', 'globals'].includes(group)) ? '' : '-';
 
-        if (['cookies', 'globals'].includes(group))
+        let value = data[group][key] ?? nullValue;
+
+        if (['cookies', 'globals'].includes(group) && value)
           value = this.#applyFilter(this.#config.filters[key], value);
 
         Array.from(inputs).forEach(input => {
+
+          if (input.value)
+            return; // Skip if the input already has a value
+
           input.value = value;
           input.setAttribute('value', value);
           input.dispatchEvent(new Event('input', { bubbles: true }));
@@ -745,6 +752,33 @@ export default class CampaignCollector
 
       window.addEventListener('popstate', handleSpaNavigation);
       window.onpopstate = history.onpushstate = handleSpaNavigation;
+    }
+
+    if (this.#config.stripUtmsFromInternalLinks) {
+      const linkHandler = (e) => {
+        const target = e.target.closest('a[href]');
+        
+        if (! target) 
+          return;
+
+        const url = new URL(target.href);
+
+        // @todo we probably need this to match on the root domain to account for internal links to subdomains.
+        if (url.hostname !== this.#url.hostname)
+          return;
+
+        if (! url.search.includes('utm_'))
+          return;
+
+        this.#paramAllowList.utm.forEach((param) => {
+          url.searchParams.delete(`utm_${param}`);
+        });
+
+        target.href = url.href;
+      };
+      
+      document.addEventListener('touchstart', linkHandler);
+      document.addEventListener('mousedown', linkHandler);
     }
 
     const debounce = (func, wait) => {
