@@ -106,6 +106,7 @@ export default class CampaignCollector
    */
   #paramAllowList = {
     utm: [
+      // Natively supported and documented UTM parameters
       'source',
       'medium',
       'campaign',
@@ -115,6 +116,20 @@ export default class CampaignCollector
       'source_platform', 
       'marketing_tactic', 
       'creative_format', 
+      // "Synthetic" UTM parameters (not natively supported by Google -- but commonly added by adbuyers)
+      'group',     // Set/Group ID
+      'ad',        // Ad ID
+      'product',   // Product ID
+      'feed',      // Feed Item ID
+      'creative',  // Creative ID
+      'extension', // Extension
+      'geo_int',   // Location (Interest)
+      'geo_phy',   // Location (Physical)
+      'target',    // Target
+      'network',   // Network
+      'device',    // Device
+      'matchtype', // Match Type
+      'placement', // Placement
     ],
     // $ns gets replaced with the this.#config.namespace on init
     $ns: [
@@ -130,7 +145,6 @@ export default class CampaignCollector
       'extension', // Extension
       'geo_int',   // Location (Interest)
       'geo_phy',   // Location (Physical)
-      //'position',  // Position
       'target',    // Target
       'network',   // Network
       'device',    // Device
@@ -409,6 +423,7 @@ export default class CampaignCollector
             consent: JSON.stringify(this.#config.consent),
             attribution: this.grab({
               asJson: true,
+              dereference: true,
               without: ['params']
             }),
           };
