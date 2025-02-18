@@ -1261,13 +1261,12 @@ export default class CampaignCollector
     if (hostname === 'localhost')
       return '';
 
-    const domainParts = hostname.split('.').reverse();
+    const domainParts = hostname.split('.');
 
-    // Handle TLDs with two segments (e.g., co.uk)
-    let rootDomain = [domainParts[1], domainParts[0]].join('.');
+    if (domainParts.length <= 2)
+      rootDomain = hostname;
 
-    if (domainParts.length > 2 && domainParts[1].length <= 3)
-      rootDomain = [domainParts[2], rootDomain].join('.');
+    rootDomain = domainParts.slice(-2).join('.');
 
     this.#config.storageDomain = rootDomain;
   }
