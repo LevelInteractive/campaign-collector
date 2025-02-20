@@ -1262,13 +1262,7 @@ export default class CampaignCollector
       return '';
 
     const domainParts = hostname.split('.');
-
-    if (domainParts.length <= 2)
-      rootDomain = hostname;
-
-    rootDomain = domainParts.slice(-2).join('.');
-
-    this.#config.storageDomain = rootDomain;
+    this.#config.storageDomain = (domainParts.length <= 2) ? hostname : domainParts.slice(-2).join('.');
   }
 
   /**
