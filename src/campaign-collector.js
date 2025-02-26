@@ -781,7 +781,7 @@ export default class CampaignCollector
 
         // If the clicked link is not on the same domain as the storage domain,
         // we'll decorate the URL with campaign data if it's in the decorateHostnames list.
-        if (! this.#config.decorateHostnames.includes(url.hostname))
+        if (! this.#config.decorateHostnames.some(domain => url.hostname.includes(domain) || url.hostname === domain))
           return;
 
         // build a query string using the active session data. 
@@ -793,6 +793,10 @@ export default class CampaignCollector
           if (! key.startsWith('_'))
             url.searchParams.set(key, value);
         }
+
+        // @todo
+        // We should probably append known click IDs from cookies (e.g. _fbc => fbclid) to the URL as well.
+        // Likely don't need it for Google (because Google does this via its conversion linker, but other platforms might).
 
       } else if (this.#config.stripUtmsFromInternalLinks) {
 
