@@ -769,18 +769,32 @@ export default class CampaignCollector
       window.onpopstate = history.onpushstate = handleSpaNavigation;
     }
 
-    if (this.#config.stripUtmsFromInternalLinks) {
-      const linkHandler = (e) => {
-        const target = e.target.closest('a[href]');
+    const linkHandler = (e) => {
+      const target = e.target.closest('a[href]');
+      
+      if (! target) 
+        return;
+
+      const url = new URL(target.href);
+
+      if (! url.hostname.includes(this.#config.storageDomain)) {
+
+        // If the clicked link is not on the same domain as the storage domain,
+        // we'll decorate the URL with campaign data if it's in the decorateHostnames list.
+        if (! this.#config.decorateHostnames.includes(url.hostname))
+          return;
+
+        // build a query string using the active session data. 
+        // This will be used to decorate the URL with campaign data.
+
+        const params = this.#flattenObject(this.activeSession);
         
-        if (! target) 
-          return;
+        for (const [key, value] of Object.entries(params)) {
+          if (! key.startsWith('_'))
+            url.searchParams.set(key, value);
+        }
 
-        const url = new URL(target.href);
-
-        // @todo we probably need this to match on the root domain to account for internal links to subdomains.
-        if (url.hostname !== this.#url.hostname)
-          return;
+      } else if (this.#config.stripUtmsFromInternalLinks) {
 
         if (! url.search.includes('utm_'))
           return;
@@ -789,12 +803,12 @@ export default class CampaignCollector
           url.searchParams.delete(`utm_${param}`);
         });
 
-        target.href = url.href;
-      };
-      
-      document.addEventListener('touchstart', linkHandler);
-      document.addEventListener('mousedown', linkHandler);
-    }
+      }
+
+      target.href = url.href;
+    };
+    
+    document.addEventListener('click', linkHandler, true);
 
     const debounce = (func, wait) => {
       let timeout;
