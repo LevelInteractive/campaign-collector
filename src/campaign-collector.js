@@ -1511,7 +1511,7 @@ export default class CampaignCollector
         namespace = namespace.replace('$ns', this.#config.namespace);
 
         if (! data[namespace].hasOwnProperty(field)) {
-          data[namespace][field] = field == 'net' ? ({
+          data[namespace][field] = field == 'platform' ? ({
             'adwords': 'google',
             'facebook': 'meta',
           }[value] ?? value) : value;
