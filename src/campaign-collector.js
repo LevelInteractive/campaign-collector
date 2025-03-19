@@ -131,6 +131,16 @@ export default class CampaignCollector
       'matchtype', // Match Type
       'placement', // Placement
     ],
+    hsa: [
+      'cam',
+      'grp',
+      'ad',
+      'kw',
+      'tgt',
+      'net',
+      'mt',
+      'src',
+    ],
     // $ns gets replaced with the this.#config.namespace on init
     $ns: [
       'platform',  // Platform
@@ -1440,6 +1450,9 @@ export default class CampaignCollector
     let data = {};
 
     namespaces = namespaces.length > 0 ? namespaces : [this.#config.namespace];
+
+    if (this.#url.search.includes('hsa_'))
+      namespaces.push('hsa');
   
     for (const namespace of namespaces)
       data[namespace] = {};
@@ -1470,6 +1483,43 @@ export default class CampaignCollector
   
       if (! matched) 
         data[remainderKey][key] = this.#sanitizeString(value);
+    }
+
+    /**
+     * HubSpot Ads (HSA) parameters
+     * This block of code is responsible for parsing HSA parameters and mapping them to the correct namespaced parameters so that they can be used in the session data.
+     */
+    if (data.hasOwnProperty('hsa')) {
+
+      const hsaParamMap = {
+        'net': '$ns.platform',
+        'src': '$ns.network',
+        'cam': '$ns.campaign',
+        'grp': '$ns.group',
+        'ad': '$ns.ad',
+        'tgt': '$ns.target',
+        'mt': '$ns.matchtype',
+        'kw': 'utm.term',
+      };
+
+      for (const [key, value] of Object.entries(data.hsa)) {
+        if (! hsaParamMap.hasOwnProperty(key))
+          continue;
+
+        let [namespace, field] = hsaParamMap[key].split('.');
+
+        namespace = namespace.replace('$ns', this.#config.namespace);
+
+        if (! data[namespace].hasOwnProperty(field)) {
+          data[namespace][field] = field == 'net' ? ({
+            'adwords': 'google',
+            'facebook': 'meta',
+          }[value] ?? value) : value;
+        }
+      }
+
+      delete data.hsa;
+
     }
   
     this.#params = data;
