@@ -1503,7 +1503,7 @@ export default class CampaignCollector
       };
 
       for (const [key, value] of Object.entries(data.hsa)) {
-        if (! hsaParamMap.hasOwnProperty(key))
+        if (! value || ! hsaParamMap.hasOwnProperty(key))
           continue;
 
         let [namespace, field] = hsaParamMap[key].split('.');
