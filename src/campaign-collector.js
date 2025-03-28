@@ -215,7 +215,7 @@ export default class CampaignCollector
 
     this.#url = new URL(window.location.href);
     this.#config = this.#deepMerge(this.#defaults, config);
-    
+
     this.#setNamespace();
     this.#setFieldMap();
 
@@ -745,7 +745,17 @@ export default class CampaignCollector
       // navigator.sendBeacon(endpoint, btoa(JSON.stringify(payload)));
 
     } catch(err) {
+      
+      if (window.Sentry) {
+        Sentry.setContext("payload", {
+          body: payload,
+          endpoint,
+        });
+        Sentry.captureException(err);
+      }
+
       throw new Error(`#send(): ${err.message}`);
+      
     }
   }
 
