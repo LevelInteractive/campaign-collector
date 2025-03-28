@@ -736,11 +736,14 @@ export default class CampaignCollector
       if (this.#config.debug)
         console.log('Sending payload:', payload);
 
-      fetch(endpoint, {
+      const response = await fetch(endpoint, {
         method: 'POST',
         body: btoa(JSON.stringify(payload)),
         keepalive: true,
-      });
+      })
+
+      if (! response.ok)
+        throw new Error(`#send(). Status ${response.status}`);
       
       // navigator.sendBeacon(endpoint, btoa(JSON.stringify(payload)));
 
@@ -755,7 +758,7 @@ export default class CampaignCollector
       }
 
       throw new Error(`#send(): ${err.message}`);
-      
+
     }
   }
 
