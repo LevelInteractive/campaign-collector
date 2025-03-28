@@ -621,126 +621,132 @@ export default class CampaignCollector
 
   async #send(endpoint, payload)
   {
-    if (payload.user) {
+    try{
+    
+      if (payload.user) {
 
-      const willHash = [
-        ...Object.keys(this.#config.userDataHash).filter(key => this.#config.userDataHash[key]), 
-        ...[
-          'first_name',
-          'last_name',
-          'email',
-          'phone',
-          'date_of_birth',
-          'gender',
-        ]
-      ];
+        const willHash = [
+          ...Object.keys(this.#config.userDataHash).filter(key => this.#config.userDataHash[key]), 
+          ...[
+            'first_name',
+            'last_name',
+            'email',
+            'phone',
+            'date_of_birth',
+            'gender',
+          ]
+        ];
 
-      const extracted = {};
+        const extracted = {};
 
-      const transforms = {
-        first_name: (value) => value.replace(/[^a-z]/g, ''),
-        last_name: (value) => value.replace(/[^a-z]/g, ''),
-        email: (value) => {
-          let [username, domain] = value.split('@');
-          extracted.email_domain = domain;
+        const transforms = {
+          first_name: (value) => value.replace(/[^a-z]/g, ''),
+          last_name: (value) => value.replace(/[^a-z]/g, ''),
+          email: (value) => {
+            let [username, domain] = value.split('@');
+            extracted.email_domain = domain;
 
-          let values = [
-            value,
-          ];
+            let values = [
+              value,
+            ];
 
-          if ([
-            'gmail.com',
-            'googlemail.com',
-          ].includes(domain)) {
-            // See: https://developers.google.com/google-ads/api/docs/conversions/enhanced-conversions/web#prepare-data
-            // Specifically: Remove all periods (.) that precede the domain name in gmail.com and googlemail.com email addresses.
-            username = username.replace(/\./g, '');
-            // Google doesn't explicitly state this - but we also remove any + characters and anything after it, as this is also ignored by Gmail.
-            // Basically: foo.bar+baz@gmail.com === foobar@gmail.com
-            username = username.split('+')[0];
-            values.push(username + '@' + domain);
-          };
+            if ([
+              'gmail.com',
+              'googlemail.com',
+            ].includes(domain)) {
+              // See: https://developers.google.com/google-ads/api/docs/conversions/enhanced-conversions/web#prepare-data
+              // Specifically: Remove all periods (.) that precede the domain name in gmail.com and googlemail.com email addresses.
+              username = username.replace(/\./g, '');
+              // Google doesn't explicitly state this - but we also remove any + characters and anything after it, as this is also ignored by Gmail.
+              // Basically: foo.bar+baz@gmail.com === foobar@gmail.com
+              username = username.split('+')[0];
+              values.push(username + '@' + domain);
+            };
 
-          return values;
-        },
-        phone: (value) => {
-          value = value.replace(/[^0-9]/g, '');
+            return values;
+          },
+          phone: (value) => {
+            value = value.replace(/[^0-9]/g, '');
 
-          // We don't care about non-US phone numbers
-          if (value.length < 10 || value.length > 11)
-            return null;
+            // We don't care about non-US phone numbers
+            if (value.length < 10 || value.length > 11)
+              return null;
 
-          if (value[0] !== '1' && value.length === 11)
-            return null;
+            if (value[0] !== '1' && value.length === 11)
+              return null;
 
-          value = value.length === 10 ? `1${value}` : `${value}`;
+            value = value.length === 10 ? `1${value}` : `${value}`;
 
-          const phones = [
-            value,
-            `+${value}`,
-          ];
+            const phones = [
+              value,
+              `+${value}`,
+            ];
 
-          extracted.phone_area_code = value.substring(1, 4);
-          
-          return phones;
-        },
-        city: (value) => value.replace(/[^a-z]/g, ''),
-        postal_code: (value) => value.replace(/[^0-9]/g, '').substring(0, 5),
-        date_of_birth: (value) => {
-          const date = new Date(value);
-          // calculate age
-          const MS_PER_YEAR = 1000 * 60 * 60 * 24 * 365.25;
-          extracted.age = `${Math.floor((new Date() - date) / MS_PER_YEAR)}`;
-          return date.toISOString().split('T')[0].replace('-', '');
-        },
-        gender: (value) => value.substring(0, 1),
-      };
-      
-      const processedEntries = await Promise.all(
-        Object.entries(payload.user)
-          .map(async ([field, value]) => {
+            extracted.phone_area_code = value.substring(1, 4);
             
-            if (! value) 
-              return null;
+            return phones;
+          },
+          city: (value) => value.replace(/[^a-z]/g, ''),
+          postal_code: (value) => value.replace(/[^0-9]/g, '').substring(0, 5),
+          date_of_birth: (value) => {
+            const date = new Date(value);
+            // calculate age
+            const MS_PER_YEAR = 1000 * 60 * 60 * 24 * 365.25;
+            extracted.age = `${Math.floor((new Date() - date) / MS_PER_YEAR)}`;
+            return date.toISOString().split('T')[0].replace('-', '');
+          },
+          gender: (value) => value.substring(0, 1),
+        };
+        
+        const processedEntries = await Promise.all(
+          Object.entries(payload.user)
+            .map(async ([field, value]) => {
+              
+              if (! value) 
+                return null;
 
-            let processedValue = transforms[field] ? transforms[field](value) : value;
+              let processedValue = transforms[field] ? transforms[field](value) : value;
 
-            if (! processedValue) 
-              return null;
+              if (! processedValue) 
+                return null;
 
-            if (Array.isArray(processedValue)) {
-              const hashedArray = await Promise.all(
-                processedValue.map(async v => willHash.includes(field) ? await this.#sha256(v) : v)
-              );
-              // Only return if we have valid values in the array
-              return hashedArray.some(v => v) ? [field, hashedArray] : null;
-            } else {
-              const hashedValue = willHash.includes(field) ? await this.#sha256(processedValue) : processedValue;
-              return hashedValue ? [field, hashedValue] : null;
-            }
-          })
-      );
+              if (Array.isArray(processedValue)) {
+                const hashedArray = await Promise.all(
+                  processedValue.map(async v => willHash.includes(field) ? await this.#sha256(v) : v)
+                );
+                // Only return if we have valid values in the array
+                return hashedArray.some(v => v) ? [field, hashedArray] : null;
+              } else {
+                const hashedValue = willHash.includes(field) ? await this.#sha256(processedValue) : processedValue;
+                return hashedValue ? [field, hashedValue] : null;
+              }
+            })
+        );
 
-      // Filter out null entries and create new user object
-      const validEntries = processedEntries.filter(entry => entry !== null);
-      if (validEntries.length > 0) {
-        payload.user = Object.assign(Object.fromEntries(validEntries), extracted);
-      } else {
-        payload.user = {};
+        // Filter out null entries and create new user object
+        const validEntries = processedEntries.filter(entry => entry !== null);
+        if (validEntries.length > 0) {
+          payload.user = Object.assign(Object.fromEntries(validEntries), extracted);
+        } else {
+          payload.user = {};
+        }
+
       }
 
+      if (this.#config.debug)
+        console.log('Sending payload:', payload);
+
+      fetch(endpoint, {
+        method: 'POST',
+        body: btoa(JSON.stringify(payload)),
+        keepalive: true,
+      });
+      
+      // navigator.sendBeacon(endpoint, btoa(JSON.stringify(payload)));
+
+    } catch(err) {
+      throw new Error(`#send(): ${err.message}`);
     }
-
-    if (this.#config.debug)
-      console.log('Sending payload:', payload);
-
-    fetch(endpoint, {
-      method: 'POST',
-      body: btoa(JSON.stringify(payload)),
-      keepalive: true,
-    });
-    
-    // navigator.sendBeacon(endpoint, btoa(JSON.stringify(payload)));
   }
 
   #applyFilter(filter, value)
