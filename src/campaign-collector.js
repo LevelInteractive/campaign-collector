@@ -757,7 +757,11 @@ export default class CampaignCollector
         Sentry.captureException(err);
       }
 
-      throw new Error(`#send(): ${err.message}`);
+      const error = new Error(`#send(): ${err.message}`);
+      
+      setTimeout(() => {
+        throw error;
+      }, 0);
 
     }
   }
