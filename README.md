@@ -24,7 +24,7 @@ CampaignCollector is a small utility library that allows you to easily collect c
 
 For Google Tag Manager users - this is the preferred and easiest deployment method.
 
-Install the [Campaign Collector tag template](https://tagmanager.google.com/gallery/#/owners/#) in the community gallery. You can [view the tag template repository here](https://github.com/levelinteractive/campaign-collector-gtm).
+Install the [Campaign Collector tag template](https://tagmanager.google.com/gallery/#/owners/LevelInteractive/templates/campaign-collector-gtm) from the community gallery. You can [view the tag template repository here](https://github.com/levelinteractive/campaign-collector-gtm).
 
 This method is also suggested for data-privacy compliance. This library is configured to react to changes in Google Consent Mode and will change the data that is caputred and/or stored based on the consent state of the user.
 
