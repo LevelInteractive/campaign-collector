@@ -50,6 +50,7 @@ export default class CampaignCollector
     firstPartyLeadEndpoint: null,
     firstPartyCookieEndpoint: null,
     namespace: 'lvl',
+    nullValue: '-',
     parseRules: {
       organic: {
         google: '^www\.(google)\.[a-z]{2,3}(?:\.[a-z]{2})?$',
@@ -456,7 +457,7 @@ export default class CampaignCollector
         if (! inputs?.length) 
           continue;
 
-        let nullValue = (['cookies', 'globals'].includes(group)) ? '' : '-';
+        let nullValue = (['cookies', 'globals'].includes(group)) ? '' : this.#config.nullValue;
 
         let value = data[group][key] ?? nullValue;
 
