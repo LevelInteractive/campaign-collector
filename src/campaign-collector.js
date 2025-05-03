@@ -950,6 +950,10 @@ export default class CampaignCollector
 
       let value = this.#getCookie(cookieName);
 
+      value = this.#sanitizeString(value, {
+        maybeJson: true
+      });
+
       if (! value)
         continue;
 
@@ -980,6 +984,10 @@ export default class CampaignCollector
 
       try{
         let value = this.#resolveGlobal(path);
+
+        value = this.#sanitizeString(value, {
+          maxLength: 1024
+        });
 
         if (! value)
           continue;
@@ -1331,33 +1339,80 @@ export default class CampaignCollector
   }
 
   /**
+   * Recursively decodes a URI component until it can no longer be decoded or the maximum number of iterations is reached.
+   * 
+   * @param {*} input 
+   * @param {*} maxIterations 
+   * @returns 
+   */
+  #recursiveDecode(input, maxIterations = 10) 
+  {
+    let previousValue;
+    let iterations = 0;
+    
+    do {
+      previousValue = input;
+      try {
+        input = decodeURIComponent(input);
+        iterations++;
+      } catch(e) {
+        break;
+      }
+    } while (previousValue !== input && iterations < maxIterations);
+  
+    return input;
+  }
+
+  /**
    * Sanitizes a string value by trimming, truncating, and removing unwanted characters.
    * 
    * @param {string} value - The string value to sanitize.
-   * @returns {string}
+   * @param {Object} settings
+   * @param {boolean} settings.maybeJson - Whether the value may contain JSON. Default: `false`.
+   * @param {number} settings.maxLength - The maximum length of the sanitized string. Default: `255`.
    */
-  #sanitizeString(value)
+  #sanitizeString(value, {
+    maybeJson = false,
+    maxLength = 255
+  } = {})
   {
-    if (! value) 
+    if (typeof value !== 'string' || ! value)
       return '';
     
     let sanitized = String(value).trim();
-    sanitized = sanitized.slice(0, 255);
 
-    // sanitized = sanitized.replace(/<[^>]*>[^<]*(<[^>]*>[^<]*)*<\/[^>]*>/g, '');
-    // sanitized = sanitized.replace(/<[^>]*>/g, '');
+    sanitized = this.#recursiveDecode(sanitized);
 
-    sanitized = sanitized.replace(/[^a-zA-Z0-9_\-%.@+~$!:=;/|\[\]\(\) ]/g, '');
+    // Most efficient way to remove any HTML from a string.
+    // Regex is complicated and error prone.
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(sanitized, 'text/html');
+    sanitized = doc.body.textContent || '';
 
-    const sqlPatterns = [
-      ///\b(SELECT|INSERT|UPDATE|DELETE|DROP|UNION|ALTER|CREATE|TRUNCATE)\b/gi,
-      /--|;/g,
-      /\/\*|\*\//g
-    ];
+    // Handle values that may contain JSON differently.
+    // Otherwise JSON will be malformed by further string sanitization.
+    if (maybeJson && sanitized.startsWith('{') && sanitized.endsWith('}')) {
+      try {
+        sanitized = JSON.stringify(JSON.parse(sanitized));
+        return sanitized;
+      } catch(e) {}
+    }
 
-    sqlPatterns.forEach(pattern => {
-      sanitized = sanitized.replace(pattern, '');
-    });
+    // Removes dangerous characters that could be used for XSS attacks.
+    // This is/was also handled by the allowlist regex below. 
+    // This is an explicit removal & safeguard in case we want to expose a config setting for customizing the allowlist in the future.
+    sanitized = sanitized.replace(/['"<>]/g, '');
+
+    // Allows:
+    // Alpha-Numeric + Spaces
+    // : / | % . _ - @ & + ~ $ ! ; = () [ ] ?
+    // Reason -- we need to account for URLs.
+    sanitized = sanitized.replace(/[^a-zA-Z0-9_\-%.?@#&+~$!:;,=/|\[\]\(\) ]/g, '');
+
+    if ((sanitized.startsWith('http') || sanitized.startsWith('/')) && sanitized.includes('?'))
+      sanitized = encodeURI(sanitized);
+
+    sanitized = sanitized.slice(0, maxLength);
 
     return sanitized;
   }
