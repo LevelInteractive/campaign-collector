@@ -108,6 +108,28 @@ export default class CampaignCollector
   #params = null;
 
   /**
+   * Anything that isn't a natively supported UTM parameter is considered an "extended" parameter.
+   * This allows us to possibly allow customization of them in the future.
+   * 
+   * @type {Array}
+   */
+  #customParamList = [
+    'group',     // Set/Group ID
+    'ad',        // Ad ID
+    'product',   // Product ID
+    'feed',      // Feed Item ID
+    'creative',  // Creative ID
+    'extension', // Extension
+    'geo_int',   // Location (Interest)
+    'geo_phy',   // Location (Physical)
+    'target',    // Target
+    'network',   // Network
+    'device',    // Device
+    'matchtype', // Match Type
+    'placement', // Placement
+  ];
+
+  /**
    * A list of parameters that are allowed to be stored in the session data.
    * The `utm` namespace is reserved for UTM parameters, and the `$ns` namespace is reserved for custom parameters.
    * This protects the session data (& structure) from getting out of control with unwanted or unexpected data.
@@ -116,30 +138,19 @@ export default class CampaignCollector
    */
   #paramAllowList = {
     utm: [
-      // Natively supported and documented UTM parameters
-      'source',
-      'medium',
-      'campaign',
-      'term',
-      'content',
-      'id',
-      'source_platform', 
-      'marketing_tactic', 
-      'creative_format', 
-      // "Synthetic" UTM parameters (not natively supported by Google -- but commonly added by adbuyers)
-      'group',     // Set/Group ID
-      'ad',        // Ad ID
-      'product',   // Product ID
-      'feed',      // Feed Item ID
-      'creative',  // Creative ID
-      'extension', // Extension
-      'geo_int',   // Location (Interest)
-      'geo_phy',   // Location (Physical)
-      'target',    // Target
-      'network',   // Network
-      'device',    // Device
-      'matchtype', // Match Type
-      'placement', // Placement
+      ...[
+        // Natively supported and documented UTM parameters
+        'source',
+        'medium',
+        'campaign',
+        'term',
+        'content',
+        'id',
+        'source_platform', 
+        'marketing_tactic', 
+        'creative_format', 
+      ], 
+      ...this.#customParamList
     ],
     hsa: [
       'cam',
@@ -153,23 +164,13 @@ export default class CampaignCollector
     ],
     // $ns gets replaced with the this.#config.namespace on init
     $ns: [
-      'platform',  // Platform
-      'source',    // Source
-      'campaign_name', // Campaign Name
-      'campaign',  // Campaign ID
-      'group',     // Set/Group ID
-      'ad',        // Ad ID
-      'product',   // Product ID
-      'feed',      // Feed Item ID
-      'creative',  // Creative ID
-      'extension', // Extension
-      'geo_int',   // Location (Interest)
-      'geo_phy',   // Location (Physical)
-      'target',    // Target
-      'network',   // Network
-      'device',    // Device
-      'matchtype', // Match Type
-      'placement', // Placement
+      ...[
+        'platform',  // Platform
+        'source',    // Source
+        'campaign_name', // Campaign Name
+        'campaign',  // Campaign ID
+      ],
+      ...this.#customParamList
     ],
   };
 
