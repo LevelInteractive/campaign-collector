@@ -14,6 +14,15 @@ export default class CampaignCollector
   #config = null;
 
   /**
+   * A modified URL object that is used to store the current URL without custom namespaced parameters.
+   * This value is pushed to the dataLayer when the library is initialized - can be useful for overriding the default URL collected
+   * by analytics platforms like GA4 to reduce URL cardinality.
+   * 
+   * @type {String}
+   */
+  #cleanUrl = null;
+
+  /**
    * Default configuration settings.
    * These settings can be customized by passing a config object to the constructor or the `create` factory method.
    * 
@@ -205,6 +214,11 @@ export default class CampaignCollector
     }
   };
 
+  /**
+   * The URL object that is used to store the current URL.
+   * 
+   * @type {URL}
+   */
   #url;
 
   constructor(config = {})
@@ -238,6 +252,7 @@ export default class CampaignCollector
     this.#bindListeners();
 
     this.#dataLayerPush('ready', {
+      clean_url: this.#setCleanUrl(),
       config: this.#config,
     });
 
@@ -1466,6 +1481,32 @@ export default class CampaignCollector
     } else { 
       localStorage.setItem(storageName, this.#anonymousId);
     }
+  }
+
+  /**
+   * Removes noise from URL query parameters for custom namespaces.
+   * 
+   * @returns {String} 
+   */
+  #setCleanUrl()
+  {
+    const url = new URL(location.href);
+    const params = url.searchParams;
+
+    const toRemove = [];
+
+    if (params) {
+      for (const [key, value] of params.entries()) {
+        if (key.startsWith(`${this.#config.namespace}_`) || key.startsWith('hsa_'))
+          toRemove.push(key);
+      }
+    }
+
+    toRemove.forEach(key => params.delete(key));
+
+    this.#cleanUrl = url.toString();
+
+    return this.#cleanUrl;
   }
 
   /**
