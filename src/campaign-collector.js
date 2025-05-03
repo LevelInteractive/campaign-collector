@@ -257,9 +257,6 @@ export default class CampaignCollector
       config: this.#config,
     });
 
-    if (this.#config.debug)
-      console.log(this.#config);
-
     console.timeEnd(this.#_libraryName);
   }
 
@@ -296,7 +293,6 @@ export default class CampaignCollector
       'fill',
       'grab',
       'lead',
-      'debug',
     ].reduce((acc, key) => {
       acc[key] = instance[key].bind(instance);
       return acc;
@@ -401,9 +397,33 @@ export default class CampaignCollector
     dataLayer.push(payload);
   }
 
-  debug()
+  set debug(status = false)
   {
-    console.log(this.#config);
+    status = {
+      '1': true,
+      'true': true,
+      '0': false,
+      'false': false,
+    }[`${status}`] ?? false;
+
+    this.#config.debug = status;
+    this.#debug('Debug', {type: 'warn', data: (status ? '✓' : '✗')});
+  }
+
+  #debug(message, {
+    type = 'log',
+    data = null,
+  } = {})
+  {
+    if (typeof console[type] !== 'function')
+      return;
+
+    if (!['error', 'warn'].includes(type) && !this.#config.debug)
+      return;
+
+    try {
+      console[type](`${this.#_libraryName} -`, message, data);
+    } catch(e) {}
   }
 
   /**
@@ -610,7 +630,10 @@ export default class CampaignCollector
     // Remove any properties that are not in snake_case via regex match
     Object.keys(properties).forEach(key => {
       if (! /^[a-z_]+$/.test(key)) {
-        console.warn(`${this.#_libraryName}.js: Removing "${key}" from lead payload. Keys must be in snake_case format.`);
+        this.#debug(`✗ "${key}" from payload. snake_case required`, {
+          type: 'warn',
+          data: properties[key],
+        });
         delete properties[key];
       }
     });
@@ -761,14 +784,11 @@ export default class CampaignCollector
 
       }
 
-      if (this.#config.debug)
-        console.log('Sending payload:', payload);
-
       const response = await fetch(endpoint, {
         method: 'POST',
         body: btoa(JSON.stringify(payload)),
         keepalive: true,
-      })
+      });
 
       if (! response.ok)
         throw new Error(`#send(). Status ${response.status}`);
@@ -802,10 +822,13 @@ export default class CampaignCollector
     try {
       value = filter(value);
     } catch (e) {
-      console.error(
-        `${this.#_libraryName}.js: Error applying filter.`,
-        e.message
-      );
+      this.#debug('applyFilter:', {
+        type: 'error',
+        data: {
+          msg: e.message,
+          value,
+        }
+      });
     }
 
     return value;
@@ -1024,10 +1047,10 @@ export default class CampaignCollector
 
         globals[path] = value;
       } catch(e){
-        console.error(
-          `${this.#_libraryName}.js: Error resolving global "${path}"`,
-          e.message
-        );
+        this.#debug('resolveGlobal:', {
+          type: 'error',
+          data: e.message
+        });
       }
       
     }
@@ -1276,7 +1299,9 @@ export default class CampaignCollector
    */
   #monkeyPatchHistory() 
   {
-    console.warn(`${this.#_libraryName}.js: config.enableSpaSupport = true monkeypatches the the history.pushState() method.`)
+    this.#debug('monkeypatching history.pushState()', {
+      type: 'warn'
+    });
 
     let pushState = history.pushState;
 
@@ -1789,7 +1814,9 @@ export default class CampaignCollector
     ];
 
     if (checks.includes(false)) {
-      console.warn(`Invalid namespace: Defaulting to "lvl".`);
+      this.#debug('Bad namespace: Reverting to `lvl`', {
+        type: 'warn'
+      });
       this.#config.namespace = fallback;
     }
   }
