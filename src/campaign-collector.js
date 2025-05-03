@@ -237,15 +237,9 @@ export default class CampaignCollector
     this.fill();
     this.#bindListeners();
 
-    if (window.dataLayer) {
-      window.dataLayer.push({ 
-        event: `${this.#toKebabCase(this.#_libraryName)}:ready`, 
-        campaign: this.grab({
-          applyFilters: true,
-          without: ['globals']
-        }) 
-      });
-    }
+    this.#dataLayerPush('ready', {
+      config: this.#config,
+    });
 
     if (this.#config.debug)
       console.log(this.#config);
@@ -378,6 +372,19 @@ export default class CampaignCollector
     return this.#consentCheck('analytics_storage') ? this.#anonymousId : '(redacted)';
   }
 
+  #dataLayerPush(event, data = {})
+  {
+    dataLayer = window.dataLayer || [];
+
+    const eventName = `${this.#toKebabCase(this.#_libraryName)}:${event}`;
+    const payload = {
+      event: eventName,
+      _cc: data,
+    };
+
+    dataLayer.push(payload);
+  }
+
   debug()
   {
     console.log(this.#config);
@@ -408,6 +415,10 @@ export default class CampaignCollector
     const data = this.grab({
       without: ['params'],
       dereference: true
+    });
+
+    this.#dataLayerPush('fill', {
+      data
     });
 
     ['first', 'last'].forEach(touchpoint => {
