@@ -500,9 +500,7 @@ export default class CampaignCollector
             }),
           };
 
-          let value = values[group];
-
-          Array.from(inputs).forEach(input => updateInput(input, value));
+          Array.from(inputs).forEach(input => updateInput(input, values[group]));
 
         }
         
