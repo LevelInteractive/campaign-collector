@@ -470,6 +470,17 @@ export default class CampaignCollector
 
     });
 
+    const updateInput = (input, value) => { 
+
+      if (input.value === value)
+        return;
+
+      input.value = value;
+      input.setAttribute('value', value);
+      input.dispatchEvent(new Event('input', { bubbles: false }));
+    
+    };
+
     for (const [group, fields] of Object.entries(fieldMap)) {
 
       if (typeof fields === 'string') {
@@ -489,11 +500,9 @@ export default class CampaignCollector
             }),
           };
 
-          Array.from(inputs).forEach(input => {
-            input.value = values[group];
-            input.setAttribute('value', values[group]);
-            input.dispatchEvent(new Event('input', { bubbles: true }));
-          });
+          let value = values[group];
+
+          Array.from(inputs).forEach(input => updateInput(input, value));
 
         }
         
@@ -511,15 +520,7 @@ export default class CampaignCollector
 
         let value = data[group][key] ?? nullValue;
 
-        Array.from(inputs).forEach(input => {
-
-          if (input.value)
-            return; // Skip if the input already has a value
-
-          input.value = value;
-          input.setAttribute('value', value);
-          input.dispatchEvent(new Event('input', { bubbles: true }));
-        });
+        Array.from(inputs).forEach(input => updateInput(input, value));
       }
     }
   }
