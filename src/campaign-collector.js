@@ -1000,15 +1000,15 @@ export default class CampaignCollector
 
       let value = this.#getCookie(cookieName);
 
-      value = this.#sanitizeString(value, {
-        maybeJson: true
-      });
-
       if (! value)
         continue;
 
       if (applyFilters) 
         value = this.#applyFilter(this.#config.filters[cookieName], value);
+
+      value = this.#sanitizeString(value, {
+        maybeJson: true
+      });
 
       cookies[cookieName] = value;
       
@@ -1049,7 +1049,8 @@ export default class CampaignCollector
           value = this.#applyFilter(this.#config.filters[path], value);
 
         value = this.#sanitizeString(value, {
-          maxLength: 1024
+          maxLength: 1024,
+          maybeJson: true,
         });
 
         globals[path] = value;
