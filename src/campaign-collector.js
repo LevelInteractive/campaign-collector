@@ -450,6 +450,7 @@ export default class CampaignCollector
 
     const data = this.grab({
       without: ['params'],
+      applyFilters: true,
       dereference: true
     });
 
@@ -507,9 +508,6 @@ export default class CampaignCollector
         let nullValue = (['cookies', 'globals'].includes(group)) ? '' : this.#config.nullValue;
 
         let value = data[group][key] ?? nullValue;
-
-        if (['cookies', 'globals'].includes(group) && value)
-          value = this.#applyFilter(this.#config.filters[key], value);
 
         Array.from(inputs).forEach(input => {
 
