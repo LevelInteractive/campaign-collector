@@ -185,6 +185,8 @@ export default class CampaignCollector
     $ns: ['platform', 'campaign', 'group', 'ad'],
   };
 
+  #redacted = '(redacted)';
+
   /**
    * Stores the referrer URL as a URL object.
    * 
@@ -381,7 +383,7 @@ export default class CampaignCollector
 
   get anonymousId()
   {
-    return this.#consentCheck('analytics_storage') ? this.#anonymousId : '(redacted)';
+    return this.#consentCheck('analytics_storage') ? this.#anonymousId : this.#redacted;
   }
 
   #dataLayerPush(event, data = {})
@@ -563,7 +565,7 @@ export default class CampaignCollector
       output.globals = this.#collectGlobals({ applyFilters });
 
     if (! without.includes('cookies'))
-      output.cookies = this.#consentCheck('ad_user_data') ? this.#collectCookies({ applyFilters }) : {};
+      output.cookies = this.#collectCookies({ applyFilters });
 
     return asJson ? JSON.stringify(output) : output;
   }
@@ -943,9 +945,9 @@ export default class CampaignCollector
     //   console.log('ad_user_data.denied', e);
     // });
 
-    // document.addEventListener(`${ns}:analytics_storage.denied`, (e) => {
-    //   console.log('analytics_storage.denied', e);
-    // });
+    document.addEventListener(`${ns}:analytics_storage.denied`, (e) => {
+      this.#setAnonymousId();
+    });
 
     // document.addEventListener(`${ns}:ad_personalization.denied`, (e) => {
     //   console.log('ad_personalization.denied', e);
@@ -991,7 +993,7 @@ export default class CampaignCollector
   {
     let cookies = {};
 
-    if (! this.#config.fieldMap.cookies)
+    if (!this.#config.fieldMap.cookies || !this.#consentCheck('ad_user_data'))
       return cookies;
     
     for (const [cookieName, field] of Object.entries(this.#config.fieldMap.cookies)) {
@@ -1030,18 +1032,25 @@ export default class CampaignCollector
     
     for (const [path, field] of Object.entries(this.#config.fieldMap.globals)) {
 
+      if (! this.#consentCheck('analytics_storage')) {
+        if (path.startsWith('navigator') || ['screen'].includes(path)) {
+          globals[path] = this.#redacted;
+          continue;
+        }
+      }
+
       try{
         let value = this.#resolveGlobal(path);
-
-        value = this.#sanitizeString(value, {
-          maxLength: 1024
-        });
 
         if (! value)
           continue;
 
         if (applyFilters)
           value = this.#applyFilter(this.#config.filters[path], value);
+
+        value = this.#sanitizeString(value, {
+          maxLength: 1024
+        });
 
         globals[path] = value;
       } catch(e){
@@ -1383,7 +1392,12 @@ export default class CampaignCollector
    */
   #resolveGlobal(path) 
   {
-    return path.split('.').reduce((prev, curr) => {
+    const [root, property] = path.split('.');
+
+    if (! property)
+      return root === 'window' ? null : (window[root] ?? null);
+
+    return [root, property].reduce((prev, curr) => {
       return prev ? prev[curr] : null
     }, window);
   }
@@ -1497,12 +1511,15 @@ export default class CampaignCollector
     const storageName = `_${this.#config.storageNamespace}_anonymous_id`;
     this.#anonymousId = this.#getCookie(storageName);
 
-    if (! this.#anonymousId)
+    if (this.#consentCheck('analytics_storage') === false) {
+      this.#anonymousId = this.#redacted;
+    } else if (! this.#anonymousId?.startsWith('CC.')) {
       this.#anonymousId = `CC.1.${Date.now()}.${Math.floor(Math.random() * Number.MAX_SAFE_INTEGER)}`;
+    }
 
     if (this.#config.storageMethod === 'cookie') {
       document.cookie = `${storageName}=${this.#anonymousId}; max-age=${this.#getSecondsFor({value: 400, units: 'days'})}; path=/; domain=${this.#config.storageDomain}; secure`;
-    } else { 
+    } else {
       localStorage.setItem(storageName, this.#anonymousId);
     }
   }
