@@ -1,7 +1,7 @@
 export default class CampaignCollector
 {
   #_libraryName = 'CampaignCollector';
-  #_libraryVersion = '1.0.0';
+  #_libraryVersion = '1.1.0';
 
   #anonymousId;
 
