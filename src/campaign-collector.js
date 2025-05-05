@@ -596,6 +596,7 @@ export default class CampaignCollector
     let payload = {
       anonymous_id: this.anonymousId,
       sent_at: new Date().getTime(),
+      transport: 'beacon',
       event: 'lead',
       consent: this.#config.consent,
       context: {
@@ -783,6 +784,13 @@ export default class CampaignCollector
 
       }
 
+      const queued = navigator.sendBeacon(endpoint, btoa(JSON.stringify(payload)));
+ 
+      if (queued)
+        return;
+        
+      payload.transport = 'fetch';
+
       const response = await fetch(endpoint, {
         method: 'POST',
         body: btoa(JSON.stringify(payload)),
@@ -791,25 +799,9 @@ export default class CampaignCollector
 
       if (! response.ok)
         throw new Error(`#send(). Status ${response.status}`);
-      
-      // navigator.sendBeacon(endpoint, btoa(JSON.stringify(payload)));
 
     } catch(err) {
-      
-      if (window.Sentry) {
-        Sentry.setContext("payload", {
-          body: payload,
-          endpoint,
-        });
-        Sentry.captureException(err);
-      }
-
-      const error = new Error(`#send(): ${err.message}`);
-      
-      setTimeout(() => {
-        throw error;
-      }, 0);
-
+      throw new Error(`#send(): ${err.message}`);
     }
   }
 
