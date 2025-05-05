@@ -619,7 +619,7 @@ export default class CampaignCollector
       sent_at: new Date().getTime(),
       transport: 'beacon',
       event: 'lead',
-      consent: this.#config.consent,
+      consent: this.#getConsent(),
       context: {
         attribution: this.grab({
           without: ['anonymous_id', 'params', 'globals']
