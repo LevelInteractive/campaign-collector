@@ -67,6 +67,7 @@ export default class CampaignCollector
     },
     fieldTargetMethod: ['name'],
     fieldDataAttribute: 'data-campaign-collector',
+    fillOnLoad: true,
     filters: {},
     firstPartyLeadEndpoint: null,
     firstPartyCookieEndpoint: null,
@@ -263,7 +264,9 @@ export default class CampaignCollector
     this.#sessions = this.#sessionGetAll();
     this.#maybeUpdateSession();
 
-    this.fill();
+    if (this.#config.fillOnLoad)
+      this.fill();
+
     this.#bindListeners();
 
     this.#dataLayerPush('ready', {
@@ -1203,6 +1206,11 @@ export default class CampaignCollector
     return match ? match[2].trim() : null;
   }
 
+  #deleteCookie(name)
+  {
+    document.cookie = `${name}=; max-age=0; path=/; domain=${this.#config.storageDomain}`;
+  }
+
   /**
    * Gets the number of seconds for a given value and unit.
    * 
@@ -1538,8 +1546,10 @@ export default class CampaignCollector
     const storageName = `_${this.#config.storageNamespace}_anonymous_id`;
     this.#anonymousId = this.#getCookie(storageName);
 
-    if (this.#checkConsentStatus('analytics_storage') === false) {
+    if (!this.#checkConsentStatus('analytics_storage')) {
       this.#anonymousId = this.#redacted;
+      this.#deleteCookie(storageName);
+      return;
     } else if (! this.#anonymousId?.startsWith('CC.')) {
       this.#anonymousId = `CC.1.${Date.now()}.${Math.floor(Math.random() * Number.MAX_SAFE_INTEGER)}`;
     }
