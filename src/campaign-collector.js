@@ -1,7 +1,7 @@
 export default class CampaignCollector
 {
   #_libraryName = 'CampaignCollector';
-  #_libraryVersion = '1.0.0';
+  #_libraryVersion = '1.1.0';
 
   #anonymousId;
 
@@ -14,6 +14,15 @@ export default class CampaignCollector
   #config = null;
 
   /**
+   * A modified URL object that is used to store the current URL without custom namespaced parameters.
+   * This value is pushed to the dataLayer when the library is initialized - can be useful for overriding the default URL collected
+   * by analytics platforms like GA4 to reduce URL cardinality.
+   * 
+   * @type {String}
+   */
+  #cleanUrl = null;
+
+  /**
    * Default configuration settings.
    * These settings can be customized by passing a config object to the constructor or the `create` factory method.
    * 
@@ -21,10 +30,22 @@ export default class CampaignCollector
    */
   #defaults = {
     consent: {
-      ad_personalization: null,
-      ad_storage: null,
-      ad_user_data: null,
-      analytics_storage: null,
+      ad_personalization: {
+        status: null, 
+        redacts: []
+      },
+      ad_storage: {
+        status: null, 
+        redacts: []
+      },
+      ad_user_data: {
+        status: null, 
+        redacts: []
+      },
+      analytics_storage: {
+        status: null,
+        redacts: []
+      },
     },
     debug: false,
     decorateHostnames: [],
@@ -46,6 +67,7 @@ export default class CampaignCollector
     },
     fieldTargetMethod: ['name'],
     fieldDataAttribute: 'data-campaign-collector',
+    fillOnLoad: true,
     filters: {},
     firstPartyLeadEndpoint: null,
     firstPartyCookieEndpoint: null,
@@ -99,6 +121,28 @@ export default class CampaignCollector
   #params = null;
 
   /**
+   * Anything that isn't a natively supported UTM parameter is considered an "extended" parameter.
+   * This allows us to possibly allow customization of them in the future.
+   * 
+   * @type {Array}
+   */
+  #customParamList = [
+    'group',     // Set/Group ID
+    'ad',        // Ad ID
+    'product',   // Product ID
+    'feed',      // Feed Item ID
+    'creative',  // Creative ID
+    'extension', // Extension
+    'geo_int',   // Location (Interest)
+    'geo_phy',   // Location (Physical)
+    'target',    // Target
+    'network',   // Network
+    'device',    // Device
+    'matchtype', // Match Type
+    'placement', // Placement
+  ];
+
+  /**
    * A list of parameters that are allowed to be stored in the session data.
    * The `utm` namespace is reserved for UTM parameters, and the `$ns` namespace is reserved for custom parameters.
    * This protects the session data (& structure) from getting out of control with unwanted or unexpected data.
@@ -107,30 +151,19 @@ export default class CampaignCollector
    */
   #paramAllowList = {
     utm: [
-      // Natively supported and documented UTM parameters
-      'source',
-      'medium',
-      'campaign',
-      'term',
-      'content',
-      'id',
-      'source_platform', 
-      'marketing_tactic', 
-      'creative_format', 
-      // "Synthetic" UTM parameters (not natively supported by Google -- but commonly added by adbuyers)
-      'group',     // Set/Group ID
-      'ad',        // Ad ID
-      'product',   // Product ID
-      'feed',      // Feed Item ID
-      'creative',  // Creative ID
-      'extension', // Extension
-      'geo_int',   // Location (Interest)
-      'geo_phy',   // Location (Physical)
-      'target',    // Target
-      'network',   // Network
-      'device',    // Device
-      'matchtype', // Match Type
-      'placement', // Placement
+      ...[
+        // Natively supported and documented UTM parameters
+        'source',
+        'medium',
+        'campaign',
+        'term',
+        'content',
+        'id',
+        'source_platform', 
+        'marketing_tactic', 
+        'creative_format', 
+      ], 
+      ...this.#customParamList
     ],
     hsa: [
       'cam',
@@ -144,23 +177,13 @@ export default class CampaignCollector
     ],
     // $ns gets replaced with the this.#config.namespace on init
     $ns: [
-      'platform',  // Platform
-      'source',    // Source
-      'campaign_name', // Campaign Name
-      'campaign',  // Campaign ID
-      'group',     // Set/Group ID
-      'ad',        // Ad ID
-      'product',   // Product ID
-      'feed',      // Feed Item ID
-      'creative',  // Creative ID
-      'extension', // Extension
-      'geo_int',   // Location (Interest)
-      'geo_phy',   // Location (Physical)
-      'target',    // Target
-      'network',   // Network
-      'device',    // Device
-      'matchtype', // Match Type
-      'placement', // Placement
+      ...[
+        'platform',  // Platform
+        'source',    // Source
+        'campaign_name', // Campaign Name
+        'campaign',  // Campaign ID
+      ],
+      ...this.#customParamList
     ],
   };
 
@@ -174,6 +197,8 @@ export default class CampaignCollector
     utm: ['source', 'medium', 'campaign'],
     $ns: ['platform', 'campaign', 'group', 'ad'],
   };
+
+  #redacted = '(redacted)';
 
   /**
    * Stores the referrer URL as a URL object.
@@ -205,6 +230,11 @@ export default class CampaignCollector
     }
   };
 
+  /**
+   * The URL object that is used to store the current URL.
+   * 
+   * @type {URL}
+   */
   #url;
 
   constructor(config = {})
@@ -234,21 +264,15 @@ export default class CampaignCollector
     this.#sessions = this.#sessionGetAll();
     this.#maybeUpdateSession();
 
-    this.fill();
+    if (this.#config.fillOnLoad)
+      this.fill();
+
     this.#bindListeners();
 
-    if (window.dataLayer) {
-      window.dataLayer.push({ 
-        event: `${this.#toKebabCase(this.#_libraryName)}:ready`, 
-        campaign: this.grab({
-          applyFilters: true,
-          without: ['globals']
-        }) 
-      });
-    }
-
-    if (this.#config.debug)
-      console.log(this.#config);
+    this.#dataLayerPush('ready', {
+      clean_url: this.#setCleanUrl(),
+      config: this.#config,
+    });
 
     console.timeEnd(this.#_libraryName);
   }
@@ -256,7 +280,8 @@ export default class CampaignCollector
   static canRun() {
     return typeof WeakMap !== 'undefined' && 
            typeof URL !== 'undefined' && 
-           typeof localStorage !== 'undefined';
+           typeof localStorage !== 'undefined' &&
+           typeof DOMParser !== 'undefined';
   }
 
   /**
@@ -286,7 +311,6 @@ export default class CampaignCollector
       'fill',
       'grab',
       'lead',
-      'debug',
     ].reduce((acc, key) => {
       acc[key] = instance[key].bind(instance);
       return acc;
@@ -301,14 +325,14 @@ export default class CampaignCollector
       'analytics_storage',
       'ad_personalization'
     ].includes(type))
-      throw new Error(`Invalid consent key.`);
+      throw new Error('Consent type invalid');
 
     if (! [
       'granted', 
       'denied', 
       null
     ].includes(status))
-      throw new Error('Invalid consent value. Must be "granted", "denied", or null.');
+      throw new Error('Consent status must be "granted", "denied", or null');
 
     const ns = 'campaign-collector';
 
@@ -375,39 +399,99 @@ export default class CampaignCollector
 
   get anonymousId()
   {
-    return this.#consentCheck('analytics_storage') ? this.#anonymousId : '(redacted)';
+    return this.#checkConsentStatus('analytics_storage') ? this.#anonymousId : this.#redacted;
   }
 
-  debug()
+  #dataLayerPush(event, data = {})
   {
-    console.log(this.#config);
+    dataLayer = window.dataLayer || [];
+
+    const eventName = `${this.#toKebabCase(this.#_libraryName)}:${event}`;
+    const payload = {
+      event: eventName,
+      _cc: data,
+    };
+
+    dataLayer.push(payload);
+  }
+
+  set debug(status = false)
+  {
+    status = {
+      '1': true,
+      'true': true,
+      '0': false,
+      'false': false,
+    }[`${status}`] ?? false;
+
+    this.#config.debug = status;
+    this.#debug('Debug', {type: 'warn', data: (status ? '✓' : '✗')});
+  }
+
+  #debug(message, {
+    type = 'log',
+    data = null,
+  } = {})
+  {
+    if (typeof console[type] !== 'function')
+      return;
+
+    if (!['error', 'warn'].includes(type) && !this.#config.debug)
+      return;
+
+    try {
+      console[type](`${this.#_libraryName} -`, message, data);
+    } catch(e) {}
   }
 
   /**
    * Fills form inputs with campaign data based on the config `fieldMap`, and `fieldTargetMethod`.
    * Accepts an optional settings parameter to override the default config values `fieldTargetMethod` , and `scope`.
    * 
-   * @param {Object} settings
-   * @param {Array|string} settings.targetMethod - The method to use to select the input elements. Default: `name`.
-   * @param {Element} settings.scope - The DOM node/element scope to search for input elements when using `.querySelectorAll()`. Default: `document`.
+   * @param {Array|string} targetMethod - The method to use to select the input elements. Default: `name`.
+   * @param {Element} scope - The DOM node/element scope to search for input elements when using `.querySelectorAll()`. Default: `document`.
    * 
    * @returns {void}
    */
-  fill(settings = {})
+  fill({
+    targetMethod,
+    scope,
+  } = {})
   {
-    if (settings.hasOwnProperty('targetMethod'))
-      settings.targetMethod = Array.isArray(settings.targetMethod) ? settings.targetMethod : [settings.targetMethod];
+    if (targetMethod && !Array.isArray(targetMethod))
+      targetMethod = [targetMethod];
 
     const query = {
-      targetMethod: settings.targetMethod || this.#config.fieldTargetMethod,
-      scope: settings.scope || document
+      targetMethod: targetMethod || this.#config.fieldTargetMethod,
+      scope: scope || document
     };
 
     const fieldMap = this.#deepCopy(this.#config.fieldMap);
 
     const data = this.grab({
       without: ['params'],
+      applyFilters: true,
       dereference: true
+    });
+
+    const updateInput = (input, value) => { 
+
+      // If the input already has a value that matches the value we're trying to set, skip it.
+      if (input.value && input.value === value)
+        return;
+
+      input.value = value;
+
+      // This isn't necessary, but it helps less technical people QA by seeing the value in the HTML in dev tools.
+      input.setAttribute('value', input.value); 
+
+      // This is necessary for some form providers (like hubspot) to ensure the value is actually set.
+      input.dispatchEvent(new Event('input', { bubbles: false }));
+    
+    };
+
+    this.#dataLayerPush('fill', {
+      data
     });
 
     ['first', 'last'].forEach(touchpoint => {
@@ -427,27 +511,21 @@ export default class CampaignCollector
         let selectorString = fields.replace('$ns', this.#config.storageNamespace);
         const inputs = query.scope.querySelectorAll(this.#makeSelectorString(query.targetMethod, selectorString));
 
-        if (inputs) {
+        if (! inputs?.length) 
+          continue;
 
-          const values = {
-            anonymous_id: this.anonymousId,
-            consent: JSON.stringify(this.#config.consent),
-            attribution: this.grab({
-              asJson: true,
-              dereference: true,
-              without: ['params']
-            }),
-          };
+        const values = {
+          anonymous_id: this.anonymousId,
+          consent: JSON.stringify(this.#getConsent()),
+          attribution: this.grab({
+            asJson: true,
+            dereference: true,
+            without: ['params']
+          }),
+        };
 
-          Array.from(inputs).forEach(input => {
-            input.value = values[group];
-            input.setAttribute('value', values[group]);
-            input.dispatchEvent(new Event('input', { bubbles: true }));
-          });
+        Array.from(inputs).forEach(input => updateInput(input, values[group]));
 
-        }
-        
-        continue;
       }
 
       for (const [key, selector] of Object.entries(fields)) {
@@ -461,18 +539,7 @@ export default class CampaignCollector
 
         let value = data[group][key] ?? nullValue;
 
-        if (['cookies', 'globals'].includes(group) && value)
-          value = this.#applyFilter(this.#config.filters[key], value);
-
-        Array.from(inputs).forEach(input => {
-
-          if (input.value)
-            return; // Skip if the input already has a value
-
-          input.value = value;
-          input.setAttribute('value', value);
-          input.dispatchEvent(new Event('input', { bubbles: true }));
-        });
+        Array.from(inputs).forEach(input => updateInput(input, value));
       }
     }
   }
@@ -518,7 +585,7 @@ export default class CampaignCollector
       output.globals = this.#collectGlobals({ applyFilters });
 
     if (! without.includes('cookies'))
-      output.cookies = this.#consentCheck('ad_user_data') ? this.#collectCookies({ applyFilters }) : {};
+      output.cookies = this.#collectCookies({ applyFilters });
 
     return asJson ? JSON.stringify(output) : output;
   }
@@ -545,11 +612,12 @@ export default class CampaignCollector
   lead(properties = {}, userData = {})
   {
     if (! this.#config.firstPartyLeadEndpoint)
-      throw new Error('`firstPartyLeadEndpoint` is required to send lead payload.');
+      throw new Error('Endpoint undefined');
 
     let payload = {
       anonymous_id: this.anonymousId,
       sent_at: new Date().getTime(),
+      transport: 'beacon',
       event: 'lead',
       consent: this.#config.consent,
       context: {
@@ -583,7 +651,10 @@ export default class CampaignCollector
     // Remove any properties that are not in snake_case via regex match
     Object.keys(properties).forEach(key => {
       if (! /^[a-z_]+$/.test(key)) {
-        console.warn(`${this.#_libraryName}.js: Removing "${key}" from lead payload. Keys must be in snake_case format.`);
+        this.#debug(`✗ "${key}" != snake_case`, {
+          type: 'warn',
+          data: properties[key],
+        });
         delete properties[key];
       }
     });
@@ -734,36 +805,24 @@ export default class CampaignCollector
 
       }
 
-      if (this.#config.debug)
-        console.log('Sending payload:', payload);
+      const queued = navigator.sendBeacon(endpoint, btoa(JSON.stringify(payload)));
+ 
+      if (queued)
+        return;
+        
+      payload.transport = 'fetch';
 
       const response = await fetch(endpoint, {
         method: 'POST',
         body: btoa(JSON.stringify(payload)),
         keepalive: true,
-      })
+      });
 
       if (! response.ok)
-        throw new Error(`#send(). Status ${response.status}`);
-      
-      // navigator.sendBeacon(endpoint, btoa(JSON.stringify(payload)));
+        throw new Error(`Status ${response.status}`);
 
     } catch(err) {
-      
-      if (window.Sentry) {
-        Sentry.setContext("payload", {
-          body: payload,
-          endpoint,
-        });
-        Sentry.captureException(err);
-      }
-
-      const error = new Error(`#send(): ${err.message}`);
-      
-      setTimeout(() => {
-        throw error;
-      }, 0);
-
+      throw new Error(`#send(): ${err.message}`);
     }
   }
 
@@ -775,10 +834,13 @@ export default class CampaignCollector
     try {
       value = filter(value);
     } catch (e) {
-      console.error(
-        `${this.#_libraryName}.js: Error applying filter.`,
-        e.message
-      );
+      this.#debug('applyFilter:', {
+        type: 'error',
+        data: {
+          msg: e.message,
+          value,
+        }
+      });
     }
 
     return value;
@@ -872,10 +934,13 @@ export default class CampaignCollector
     const deferredFill = debounce((e) => {
       const form = e.target.closest('form');
       
-      if (! form) return;
+      if (! form) 
+        return;
       
-      this.fill(form);
-    }, 1500);
+      this.fill({
+        scope: form,
+      });
+    }, 1000);
 
     ['mousedown', 'touchstart'].forEach((event) => {
       document.addEventListener(event, (e) => {
@@ -888,16 +953,16 @@ export default class CampaignCollector
 
     document.addEventListener(`${ns}:consent.change`, (e) => {
       const { type, status } = e.detail;
-      this.#consentUpdate(type, status);
+      this.#updateConsent(type, status);
     });
 
     // document.addEventListener(`${ns}:ad_user_data.denied`, (e) => {
     //   console.log('ad_user_data.denied', e);
     // });
 
-    // document.addEventListener(`${ns}:analytics_storage.denied`, (e) => {
-    //   console.log('analytics_storage.denied', e);
-    // });
+    document.addEventListener(`${ns}:analytics_storage.denied`, (e) => {
+      this.#setAnonymousId();
+    });
 
     // document.addEventListener(`${ns}:ad_personalization.denied`, (e) => {
     //   console.log('ad_personalization.denied', e);
@@ -943,18 +1008,24 @@ export default class CampaignCollector
   {
     let cookies = {};
 
-    if (! this.#config.fieldMap.cookies)
+    if (!this.#config.fieldMap.cookies)
       return cookies;
     
     for (const [cookieName, field] of Object.entries(this.#config.fieldMap.cookies)) {
 
       let value = this.#getCookie(cookieName);
 
-      if (! value)
-        continue;
+      if (value) {
 
-      if (applyFilters) 
-        value = this.#applyFilter(this.#config.filters[cookieName], value);
+        if (this.#checkConsentRedactions('ad_storage', cookieName) || this.#checkConsentRedactions('analytics_storage', cookieName))
+          value = this.#redacted;
+
+        if (value !== this.#redacted && applyFilters)
+          value = this.#applyFilter(this.#config.filters[cookieName], value);
+
+      }
+
+      value = this.#sanitizeString(value);
 
       cookies[cookieName] = value;
       
@@ -978,6 +1049,13 @@ export default class CampaignCollector
     
     for (const [path, field] of Object.entries(this.#config.fieldMap.globals)) {
 
+      if (! this.#checkConsentStatus('analytics_storage')) {
+        if (path.startsWith('navigator') || ['screen'].includes(path)) {
+          globals[path] = this.#redacted;
+          continue;
+        }
+      }
+
       try{
         let value = this.#resolveGlobal(path);
 
@@ -987,12 +1065,16 @@ export default class CampaignCollector
         if (applyFilters)
           value = this.#applyFilter(this.#config.filters[path], value);
 
+        value = this.#sanitizeString(value, {
+          maxLength: 1024,
+        });
+
         globals[path] = value;
       } catch(e){
-        console.error(
-          `${this.#_libraryName}.js: Error resolving global "${path}"`,
-          e.message
-        );
+        this.#debug('resolveGlobal:', {
+          type: 'error',
+          data: e.message
+        });
       }
       
     }
@@ -1000,19 +1082,37 @@ export default class CampaignCollector
     return globals;
   }
 
-  #consentCheck(type)
+  #checkConsentStatus(type)
   {
     return {
       'granted': true,
       'denied': false,
       'null': true,
       null: true,
-    }[this.#config.consent[type]];
+    }[this.#config.consent[type].status];
   }
 
-  #consentUpdate(type, status)
+  #checkConsentRedactions(type, key)
   {
-    this.#config.consent[type] = status ? status.toLowerCase() : null;
+    const status = this.#checkConsentStatus(type);
+
+    if (status)
+      return !status; // true means we redact - so we want to return the opposite for the status check.
+
+    return this.#config.consent[type].redacts.includes(key);
+  }
+
+  #updateConsent(type, status)
+  {
+    this.#config.consent[type].status = status ? status.toLowerCase() : null;
+  }
+
+  #getConsent()
+  {
+    return Object.entries(this.#config.consent).reduce((result, [key, value]) => {
+      result[key] = value.status;
+      return result;
+    }, {});
   }
 
   /**
@@ -1107,6 +1207,11 @@ export default class CampaignCollector
   {
     const match = document.cookie.match(new RegExp('(^| )' + name + '=([^;]+)'));
     return match ? match[2].trim() : null;
+  }
+
+  #deleteCookie(name)
+  {
+    document.cookie = `${name}=; max-age=0; path=/; domain=${this.#config.storageDomain}`;
   }
 
   /**
@@ -1241,7 +1346,9 @@ export default class CampaignCollector
    */
   #monkeyPatchHistory() 
   {
-    console.warn(`${this.#_libraryName}.js: config.enableSpaSupport = true monkeypatches the the history.pushState() method.`)
+    this.#debug('monkeypatching pushState()', {
+      type: 'warn'
+    });
 
     let pushState = history.pushState;
 
@@ -1325,39 +1432,89 @@ export default class CampaignCollector
    */
   #resolveGlobal(path) 
   {
-    return path.split('.').reduce((prev, curr) => {
+    const [root, property] = path.split('.');
+
+    if (! property)
+      return root === 'window' ? null : (window[root] ?? null);
+
+    return [root, property].reduce((prev, curr) => {
       return prev ? prev[curr] : null
     }, window);
+  }
+
+  /**
+   * Recursively decodes a URI component until it can no longer be decoded or the maximum number of iterations is reached.
+   * 
+   * @param {*} input 
+   * @param {*} maxIterations 
+   * @returns 
+   */
+  #recursiveDecode(input, maxIterations = 10) 
+  {
+    let previousValue;
+    let iterations = 0;
+    
+    do {
+      previousValue = input;
+      try {
+        input = decodeURIComponent(input);
+        iterations++;
+      } catch(e) {
+        break;
+      }
+    } while (previousValue !== input && iterations < maxIterations);
+  
+    return input;
   }
 
   /**
    * Sanitizes a string value by trimming, truncating, and removing unwanted characters.
    * 
    * @param {string} value - The string value to sanitize.
-   * @returns {string}
+   * @param {Object} settings
+   * @param {number} settings.maxLength - The maximum length of the sanitized string. Default: `255`.
    */
-  #sanitizeString(value)
+  #sanitizeString(value, {
+    maxLength = 255
+  } = {})
   {
-    if (! value) 
+    if (typeof value !== 'string' || ! value)
       return '';
     
     let sanitized = String(value).trim();
-    sanitized = sanitized.slice(0, 255);
 
-    // sanitized = sanitized.replace(/<[^>]*>[^<]*(<[^>]*>[^<]*)*<\/[^>]*>/g, '');
-    // sanitized = sanitized.replace(/<[^>]*>/g, '');
+    sanitized = this.#recursiveDecode(sanitized);
 
-    sanitized = sanitized.replace(/[^a-zA-Z0-9_\-%.@+~$!:=;/|\[\]\(\) ]/g, '');
+    // Most efficient way to remove any HTML from a string.
+    // Regex is complicated and error prone.
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(sanitized, 'text/html');
+    sanitized = doc.body.textContent || '';
 
-    const sqlPatterns = [
-      ///\b(SELECT|INSERT|UPDATE|DELETE|DROP|UNION|ALTER|CREATE|TRUNCATE)\b/gi,
-      /--|;/g,
-      /\/\*|\*\//g
-    ];
+    // Handle values that look like JSON differently.
+    // Otherwise JSON will be malformed by further string sanitization.
+    if (sanitized.startsWith('{') && sanitized.endsWith('}')) {
+      try {
+        sanitized = JSON.stringify(JSON.parse(sanitized));
+        return sanitized;
+      } catch(e) {}
+    }
 
-    sqlPatterns.forEach(pattern => {
-      sanitized = sanitized.replace(pattern, '');
-    });
+    // Removes dangerous characters that could be used for XSS attacks.
+    // This is/was also handled by the allowlist regex below. 
+    // This is an explicit removal & safeguard in case we want to expose a config setting for customizing the allowlist in the future.
+    sanitized = sanitized.replace(/['"<>]/g, '');
+
+    // Allows:
+    // Alpha-Numeric + Spaces
+    // : / | % . _ - @ & + ~ $ ! ; = () [ ] ? { } ,
+    // Reason -- we need to account for URLs - and URLS have a fairly large set of allowed characters.
+    sanitized = sanitized.replace(/[^a-zA-Z0-9_\-%.?@#&+~$!:;,=/|{}\[\]\(\) ]/g, '');
+
+    if ((sanitized.startsWith('http') || sanitized.startsWith('/')) && sanitized.includes('?'))
+      sanitized = encodeURI(sanitized);
+
+    sanitized = sanitized.slice(0, maxLength);
 
     return sanitized;
   }
@@ -1392,14 +1549,45 @@ export default class CampaignCollector
     const storageName = `_${this.#config.storageNamespace}_anonymous_id`;
     this.#anonymousId = this.#getCookie(storageName);
 
-    if (! this.#anonymousId)
+    if (!this.#checkConsentStatus('analytics_storage')) {
+      this.#anonymousId = this.#redacted;
+      this.#deleteCookie(storageName);
+      return;
+    } else if (! this.#anonymousId?.startsWith('CC.')) {
       this.#anonymousId = `CC.1.${Date.now()}.${Math.floor(Math.random() * Number.MAX_SAFE_INTEGER)}`;
+    }
 
     if (this.#config.storageMethod === 'cookie') {
       document.cookie = `${storageName}=${this.#anonymousId}; max-age=${this.#getSecondsFor({value: 400, units: 'days'})}; path=/; domain=${this.#config.storageDomain}; secure`;
-    } else { 
+    } else {
       localStorage.setItem(storageName, this.#anonymousId);
     }
+  }
+
+  /**
+   * Removes noise from URL query parameters for custom namespaces.
+   * 
+   * @returns {String} 
+   */
+  #setCleanUrl()
+  {
+    const url = new URL(location.href);
+    const params = url.searchParams;
+
+    const toRemove = [];
+
+    if (params) {
+      for (const [key, value] of params.entries()) {
+        if (key.startsWith(`${this.#config.namespace}_`) || key.startsWith('hsa_'))
+          toRemove.push(key);
+      }
+    }
+
+    toRemove.forEach(key => params.delete(key));
+
+    this.#cleanUrl = url.toString();
+
+    return this.#cleanUrl;
   }
 
   /**
@@ -1681,7 +1869,9 @@ export default class CampaignCollector
     ];
 
     if (checks.includes(false)) {
-      console.warn(`Invalid namespace: Defaulting to "lvl".`);
+      this.#debug('Bad namespace: Reverting to `lvl`', {
+        type: 'warn'
+      });
       this.#config.namespace = fallback;
     }
   }
