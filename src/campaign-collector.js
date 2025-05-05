@@ -934,10 +934,13 @@ export default class CampaignCollector
     const deferredFill = debounce((e) => {
       const form = e.target.closest('form');
       
-      if (! form) return;
+      if (! form) 
+        return;
       
-      this.fill(form);
-    }, 1500);
+      this.fill({
+        scope: form,
+      });
+    }, 1000);
 
     ['mousedown', 'touchstart'].forEach((event) => {
       document.addEventListener(event, (e) => {
