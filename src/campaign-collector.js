@@ -322,14 +322,14 @@ export default class CampaignCollector
       'analytics_storage',
       'ad_personalization'
     ].includes(type))
-      throw new Error(`Invalid consent key.`);
+      throw new Error('Consent type invalid');
 
     if (! [
       'granted', 
       'denied', 
       null
     ].includes(status))
-      throw new Error('Invalid consent value. Must be "granted", "denied", or null.');
+      throw new Error('Consent status must be "granted", "denied", or null');
 
     const ns = 'campaign-collector';
 
@@ -396,7 +396,7 @@ export default class CampaignCollector
 
   get anonymousId()
   {
-    return this.#consentCheckStatus('analytics_storage') ? this.#anonymousId : this.#redacted;
+    return this.#checkConsentStatus('analytics_storage') ? this.#anonymousId : this.#redacted;
   }
 
   #dataLayerPush(event, data = {})
@@ -473,6 +473,7 @@ export default class CampaignCollector
 
     const updateInput = (input, value) => { 
 
+      // If the input already has a value that matches the value we're trying to set, skip it.
       if (input.value && input.value === value)
         return;
 
@@ -512,7 +513,7 @@ export default class CampaignCollector
 
         const values = {
           anonymous_id: this.anonymousId,
-          consent: JSON.stringify(this.#consentObject),
+          consent: JSON.stringify(this.#getConsent()),
           attribution: this.grab({
             asJson: true,
             dereference: true,
@@ -608,7 +609,7 @@ export default class CampaignCollector
   lead(properties = {}, userData = {})
   {
     if (! this.#config.firstPartyLeadEndpoint)
-      throw new Error('`firstPartyLeadEndpoint` is required to send lead payload.');
+      throw new Error('Endpoint undefined');
 
     let payload = {
       anonymous_id: this.anonymousId,
@@ -647,7 +648,7 @@ export default class CampaignCollector
     // Remove any properties that are not in snake_case via regex match
     Object.keys(properties).forEach(key => {
       if (! /^[a-z_]+$/.test(key)) {
-        this.#debug(`✗ "${key}" from payload. snake_case required`, {
+        this.#debug(`✗ "${key}" != snake_case`, {
           type: 'warn',
           data: properties[key],
         });
@@ -815,7 +816,7 @@ export default class CampaignCollector
       });
 
       if (! response.ok)
-        throw new Error(`#send(). Status ${response.status}`);
+        throw new Error(`Status ${response.status}`);
 
     } catch(err) {
       throw new Error(`#send(): ${err.message}`);
@@ -946,7 +947,7 @@ export default class CampaignCollector
 
     document.addEventListener(`${ns}:consent.change`, (e) => {
       const { type, status } = e.detail;
-      this.#consentUpdate(type, status);
+      this.#updateConsent(type, status);
     });
 
     // document.addEventListener(`${ns}:ad_user_data.denied`, (e) => {
@@ -1010,7 +1011,7 @@ export default class CampaignCollector
 
       if (value) {
 
-        if (this.#consentCheckRedact('ad_storage', cookieName) || this.#consentCheckRedact('analytics_storage', cookieName))
+        if (this.#checkConsentRedactions('ad_storage', cookieName) || this.#checkConsentRedactions('analytics_storage', cookieName))
           value = this.#redacted;
 
         if (value !== this.#redacted && applyFilters)
@@ -1042,7 +1043,7 @@ export default class CampaignCollector
     
     for (const [path, field] of Object.entries(this.#config.fieldMap.globals)) {
 
-      if (! this.#consentCheckStatus('analytics_storage')) {
+      if (! this.#checkConsentStatus('analytics_storage')) {
         if (path.startsWith('navigator') || ['screen'].includes(path)) {
           globals[path] = this.#redacted;
           continue;
@@ -1075,7 +1076,7 @@ export default class CampaignCollector
     return globals;
   }
 
-  #consentCheckStatus(type)
+  #checkConsentStatus(type)
   {
     return {
       'granted': true,
@@ -1085,9 +1086,9 @@ export default class CampaignCollector
     }[this.#config.consent[type].status];
   }
 
-  #consentCheckRedact(type, key)
+  #checkConsentRedactions(type, key)
   {
-    const status = this.#consentCheckStatus(type);
+    const status = this.#checkConsentStatus(type);
 
     if (status)
       return !status; // true means we redact - so we want to return the opposite for the status check.
@@ -1095,12 +1096,12 @@ export default class CampaignCollector
     return this.#config.consent[type].redacts.includes(key);
   }
 
-  #consentUpdate(type, status)
+  #updateConsent(type, status)
   {
     this.#config.consent[type].status = status ? status.toLowerCase() : null;
   }
 
-  get #consentObject()
+  #getConsent()
   {
     return Object.entries(this.#config.consent).reduce((result, [key, value]) => {
       result[key] = value.status;
@@ -1334,7 +1335,7 @@ export default class CampaignCollector
    */
   #monkeyPatchHistory() 
   {
-    this.#debug('monkeypatching history.pushState()', {
+    this.#debug('monkeypatching pushState()', {
       type: 'warn'
     });
 
@@ -1537,7 +1538,7 @@ export default class CampaignCollector
     const storageName = `_${this.#config.storageNamespace}_anonymous_id`;
     this.#anonymousId = this.#getCookie(storageName);
 
-    if (this.#consentCheckStatus('analytics_storage') === false) {
+    if (this.#checkConsentStatus('analytics_storage') === false) {
       this.#anonymousId = this.#redacted;
     } else if (! this.#anonymousId?.startsWith('CC.')) {
       this.#anonymousId = `CC.1.${Date.now()}.${Math.floor(Math.random() * Number.MAX_SAFE_INTEGER)}`;
