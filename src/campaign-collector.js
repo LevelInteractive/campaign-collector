@@ -265,7 +265,8 @@ export default class CampaignCollector
   static canRun() {
     return typeof WeakMap !== 'undefined' && 
            typeof URL !== 'undefined' && 
-           typeof localStorage !== 'undefined';
+           typeof localStorage !== 'undefined' &&
+           typeof DOMParser !== 'undefined';
   }
 
   /**
@@ -1462,7 +1463,7 @@ export default class CampaignCollector
     // Alpha-Numeric + Spaces
     // : / | % . _ - @ & + ~ $ ! ; = () [ ] ?
     // Reason -- we need to account for URLs.
-    sanitized = sanitized.replace(/[^a-zA-Z0-9_\-%.?@#&+~$!:;,=/|\[\]\(\) ]/g, '');
+    sanitized = sanitized.replace(/[^a-zA-Z0-9_\-%.?@#&+~$!:;,=/|{}\[\]\(\) ]/g, '');
 
     if ((sanitized.startsWith('http') || sanitized.startsWith('/')) && sanitized.includes('?'))
       sanitized = encodeURI(sanitized);
