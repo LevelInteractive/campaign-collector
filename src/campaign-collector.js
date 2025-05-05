@@ -432,20 +432,22 @@ export default class CampaignCollector
    * Fills form inputs with campaign data based on the config `fieldMap`, and `fieldTargetMethod`.
    * Accepts an optional settings parameter to override the default config values `fieldTargetMethod` , and `scope`.
    * 
-   * @param {Object} settings
-   * @param {Array|string} settings.targetMethod - The method to use to select the input elements. Default: `name`.
-   * @param {Element} settings.scope - The DOM node/element scope to search for input elements when using `.querySelectorAll()`. Default: `document`.
+   * @param {Array|string} targetMethod - The method to use to select the input elements. Default: `name`.
+   * @param {Element} scope - The DOM node/element scope to search for input elements when using `.querySelectorAll()`. Default: `document`.
    * 
    * @returns {void}
    */
-  fill(settings = {})
+  fill({
+    targetMethod,
+    scope,
+  } = {})
   {
-    if (settings.hasOwnProperty('targetMethod'))
-      settings.targetMethod = Array.isArray(settings.targetMethod) ? settings.targetMethod : [settings.targetMethod];
+    if (targetMethod && !Array.isArray(targetMethod))
+      targetMethod = [targetMethod];
 
     const query = {
-      targetMethod: settings.targetMethod || this.#config.fieldTargetMethod,
-      scope: settings.scope || document
+      targetMethod: targetMethod || this.#config.fieldTargetMethod,
+      scope: scope || document
     };
 
     const fieldMap = this.#deepCopy(this.#config.fieldMap);
@@ -455,6 +457,21 @@ export default class CampaignCollector
       applyFilters: true,
       dereference: true
     });
+
+    const updateInput = (input, value) => { 
+
+      if (input.value === value)
+        return;
+
+      input.value = value;
+
+      // This isn't necessary, but it helps less technical people QA by seeing the value in the HTML in dev tools.
+      input.setAttribute('value', input.value); 
+
+      // This is necessary for some form providers (like hubspot) to ensure the value is actually set.
+      input.dispatchEvent(new Event('input', { bubbles: false }));
+    
+    };
 
     this.#dataLayerPush('fill', {
       data
@@ -470,17 +487,6 @@ export default class CampaignCollector
 
     });
 
-    const updateInput = (input, value) => { 
-
-      if (input.value === value)
-        return;
-
-      input.value = value;
-      input.setAttribute('value', value);
-      input.dispatchEvent(new Event('input', { bubbles: false }));
-    
-    };
-
     for (const [group, fields] of Object.entries(fieldMap)) {
 
       if (typeof fields === 'string') {
@@ -488,23 +494,21 @@ export default class CampaignCollector
         let selectorString = fields.replace('$ns', this.#config.storageNamespace);
         const inputs = query.scope.querySelectorAll(this.#makeSelectorString(query.targetMethod, selectorString));
 
-        if (inputs) {
+        if (! inputs?.length) 
+          continue;
 
-          const values = {
-            anonymous_id: this.anonymousId,
-            consent: JSON.stringify(this.#config.consent),
-            attribution: this.grab({
-              asJson: true,
-              dereference: true,
-              without: ['params']
-            }),
-          };
+        const values = {
+          anonymous_id: this.anonymousId,
+          consent: JSON.stringify(this.#config.consent),
+          attribution: this.grab({
+            asJson: true,
+            dereference: true,
+            without: ['params']
+          }),
+        };
 
-          Array.from(inputs).forEach(input => updateInput(input, values[group]));
+        Array.from(inputs).forEach(input => updateInput(input, values[group]));
 
-        }
-        
-        continue;
       }
 
       for (const [key, selector] of Object.entries(fields)) {
@@ -997,9 +1001,7 @@ export default class CampaignCollector
       if (applyFilters) 
         value = this.#applyFilter(this.#config.filters[cookieName], value);
 
-      value = this.#sanitizeString(value, {
-        maybeJson: true
-      });
+      value = this.#sanitizeString(value);
 
       cookies[cookieName] = value;
       
@@ -1041,7 +1043,6 @@ export default class CampaignCollector
 
         value = this.#sanitizeString(value, {
           maxLength: 1024,
-          maybeJson: true,
         });
 
         globals[path] = value;
@@ -1424,11 +1425,9 @@ export default class CampaignCollector
    * 
    * @param {string} value - The string value to sanitize.
    * @param {Object} settings
-   * @param {boolean} settings.maybeJson - Whether the value may contain JSON. Default: `false`.
    * @param {number} settings.maxLength - The maximum length of the sanitized string. Default: `255`.
    */
   #sanitizeString(value, {
-    maybeJson = false,
     maxLength = 255
   } = {})
   {
@@ -1445,9 +1444,9 @@ export default class CampaignCollector
     const doc = parser.parseFromString(sanitized, 'text/html');
     sanitized = doc.body.textContent || '';
 
-    // Handle values that may contain JSON differently.
+    // Handle values that look like JSON differently.
     // Otherwise JSON will be malformed by further string sanitization.
-    if (maybeJson && sanitized.startsWith('{') && sanitized.endsWith('}')) {
+    if (sanitized.startsWith('{') && sanitized.endsWith('}')) {
       try {
         sanitized = JSON.stringify(JSON.parse(sanitized));
         return sanitized;
