@@ -1461,8 +1461,8 @@ export default class CampaignCollector
 
     // Allows:
     // Alpha-Numeric + Spaces
-    // : / | % . _ - @ & + ~ $ ! ; = () [ ] ?
-    // Reason -- we need to account for URLs.
+    // : / | % . _ - @ & + ~ $ ! ; = () [ ] ? { } ,
+    // Reason -- we need to account for URLs - and URLS have a fairly large set of allowed characters.
     sanitized = sanitized.replace(/[^a-zA-Z0-9_\-%.?@#&+~$!:;,=/|{}\[\]\(\) ]/g, '');
 
     if ((sanitized.startsWith('http') || sanitized.startsWith('/')) && sanitized.includes('?'))
