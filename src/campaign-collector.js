@@ -30,10 +30,22 @@ export default class CampaignCollector
    */
   #defaults = {
     consent: {
-      ad_personalization: null,
-      ad_storage: null,
-      ad_user_data: null,
-      analytics_storage: null,
+      ad_personalization: {
+        status: null, 
+        redacts: []
+      },
+      ad_storage: {
+        status: null, 
+        redacts: []
+      },
+      ad_user_data: {
+        status: null, 
+        redacts: []
+      },
+      analytics_storage: {
+        status: null,
+        redacts: []
+      },
     },
     debug: false,
     decorateHostnames: [],
@@ -384,7 +396,7 @@ export default class CampaignCollector
 
   get anonymousId()
   {
-    return this.#consentCheck('analytics_storage') ? this.#anonymousId : this.#redacted;
+    return this.#consentCheckStatus('analytics_storage') ? this.#anonymousId : this.#redacted;
   }
 
   #dataLayerPush(event, data = {})
@@ -461,7 +473,7 @@ export default class CampaignCollector
 
     const updateInput = (input, value) => { 
 
-      if (input.value === value)
+      if (input.value && input.value === value)
         return;
 
       input.value = value;
@@ -500,7 +512,7 @@ export default class CampaignCollector
 
         const values = {
           anonymous_id: this.anonymousId,
-          consent: JSON.stringify(this.#config.consent),
+          consent: JSON.stringify(this.#consentObject),
           attribution: this.grab({
             asJson: true,
             dereference: true,
@@ -989,18 +1001,22 @@ export default class CampaignCollector
   {
     let cookies = {};
 
-    if (!this.#config.fieldMap.cookies || !this.#consentCheck('ad_user_data'))
+    if (!this.#config.fieldMap.cookies)
       return cookies;
     
     for (const [cookieName, field] of Object.entries(this.#config.fieldMap.cookies)) {
 
       let value = this.#getCookie(cookieName);
 
-      if (! value)
-        continue;
+      if (value) {
 
-      if (applyFilters) 
-        value = this.#applyFilter(this.#config.filters[cookieName], value);
+        if (this.#consentCheckRedact('ad_storage', cookieName) || this.#consentCheckRedact('analytics_storage', cookieName))
+          value = this.#redacted;
+
+        if (value !== this.#redacted && applyFilters)
+          value = this.#applyFilter(this.#config.filters[cookieName], value);
+
+      }
 
       value = this.#sanitizeString(value);
 
@@ -1026,7 +1042,7 @@ export default class CampaignCollector
     
     for (const [path, field] of Object.entries(this.#config.fieldMap.globals)) {
 
-      if (! this.#consentCheck('analytics_storage')) {
+      if (! this.#consentCheckStatus('analytics_storage')) {
         if (path.startsWith('navigator') || ['screen'].includes(path)) {
           globals[path] = this.#redacted;
           continue;
@@ -1059,19 +1075,37 @@ export default class CampaignCollector
     return globals;
   }
 
-  #consentCheck(type)
+  #consentCheckStatus(type)
   {
     return {
       'granted': true,
       'denied': false,
       'null': true,
       null: true,
-    }[this.#config.consent[type]];
+    }[this.#config.consent[type].status];
+  }
+
+  #consentCheckRedact(type, key)
+  {
+    const status = this.#consentCheckStatus(type);
+
+    if (status)
+      return !status; // true means we redact - so we want to return the opposite for the status check.
+
+    return this.#config.consent[type].redacts.includes(key);
   }
 
   #consentUpdate(type, status)
   {
-    this.#config.consent[type] = status ? status.toLowerCase() : null;
+    this.#config.consent[type].status = status ? status.toLowerCase() : null;
+  }
+
+  get #consentObject()
+  {
+    return Object.entries(this.#config.consent).reduce((result, [key, value]) => {
+      result[key] = value.status;
+      return result;
+    }, {});
   }
 
   /**
@@ -1503,7 +1537,7 @@ export default class CampaignCollector
     const storageName = `_${this.#config.storageNamespace}_anonymous_id`;
     this.#anonymousId = this.#getCookie(storageName);
 
-    if (this.#consentCheck('analytics_storage') === false) {
+    if (this.#consentCheckStatus('analytics_storage') === false) {
       this.#anonymousId = this.#redacted;
     } else if (! this.#anonymousId?.startsWith('CC.')) {
       this.#anonymousId = `CC.1.${Date.now()}.${Math.floor(Math.random() * Number.MAX_SAFE_INTEGER)}`;
