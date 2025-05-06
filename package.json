@@ -1,7 +1,7 @@
 {
   "name": "campaign-collector",
-  "version": "1.0.0",
-  "main": "dist/campaign-collector.js",
+  "version": "1.1.0",
+  "main": "dist/core.min.js",
   "scripts": {
     "build": "webpack --mode production",
     "dev": "webpack --mode development --watch",
