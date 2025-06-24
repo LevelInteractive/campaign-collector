@@ -87,6 +87,17 @@ export default class CampaignCollector
         yandex: '^(?:www\.)?(yandex)\.com|ru$',
         lycos: '^(?:www|search)?\.?(lycos).[a-z]{2,3}(?:\.[a-z]{2})?$'
       },
+      ai: {
+        /**
+         * Note -- Grok, DeepSeek, and Nova do not pass a referrer as of 2025-05-20
+         */
+        chatgpt: '(chatgpt)\.com$',
+        gemini: '^(gemini)\.google\.com$',
+        claude: '\.(claude)\.ai$',
+        perplexity: '\.(perplexity)\.ai$',
+        mistral: '\.(mistral)\.ai$',
+        copilot: '^(copilot)\.microsoft\.com$',
+      },
       social: {
         facebook: '^www\.(facebook)\.com$',
         instagram: '(instagram)\.com$',
@@ -805,8 +816,9 @@ export default class CampaignCollector
 
       }
 
-      const queued = navigator.sendBeacon(endpoint, btoa(JSON.stringify(payload)));
- 
+      const data = JSON.stringify(payload);
+      const queued = navigator.sendBeacon(endpoint, btoa(data));
+
       if (queued)
         return;
         
@@ -814,7 +826,7 @@ export default class CampaignCollector
 
       const response = await fetch(endpoint, {
         method: 'POST',
-        body: btoa(JSON.stringify(payload)),
+        body: btoa(data),
         keepalive: true,
       });
 
