@@ -790,6 +790,9 @@ export default class CampaignCollector
               if (! value) 
                 return null;
 
+              if (value.match(/^[0-9a-fA-F]{64}$/))
+                return value; // Already hashed - skip processing
+
               let processedValue = transforms[field] ? transforms[field](value) : value;
 
               if (! processedValue) 
