@@ -522,20 +522,21 @@ export default class CampaignCollector
         let selectorString = fields.replace('$ns', this.#config.storageNamespace);
         const inputs = query.scope.querySelectorAll(this.#makeSelectorString(query.targetMethod, selectorString));
 
-        if (! inputs?.length) 
-          continue;
+        if (inputs) { 
+          const values = {
+            anonymous_id: this.anonymousId,
+            consent: JSON.stringify(this.#getConsent()),
+            attribution: this.grab({
+              asJson: true,
+              dereference: true,
+              without: ['params']
+            }),
+          };
 
-        const values = {
-          anonymous_id: this.anonymousId,
-          consent: JSON.stringify(this.#getConsent()),
-          attribution: this.grab({
-            asJson: true,
-            dereference: true,
-            without: ['params']
-          }),
-        };
+          Array.from(inputs).forEach(input => updateInput(input, values[group]));
+        }
 
-        Array.from(inputs).forEach(input => updateInput(input, values[group]));
+        continue;
 
       }
 
@@ -551,6 +552,7 @@ export default class CampaignCollector
         let value = data[group][key] ?? nullValue;
 
         Array.from(inputs).forEach(input => updateInput(input, value));
+
       }
     }
   }
