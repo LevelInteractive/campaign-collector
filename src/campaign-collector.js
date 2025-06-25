@@ -73,6 +73,7 @@ export default class CampaignCollector
     firstPartyCookieEndpoint: null,
     namespace: 'lvl',
     nullValue: '-',
+    paramMap: null,
     parseRules: {
       organic: {
         google: '^www\.(google)\.[a-z]{2,3}(?:\.[a-z]{2})?$',
@@ -206,7 +207,7 @@ export default class CampaignCollector
    */
   #paramsExpected = {
     utm: ['source', 'medium', 'campaign'],
-    $ns: ['platform', 'campaign', 'group', 'ad'],
+    $ns: ['campaign', 'group', 'ad'],
   };
 
   #redacted = '(redacted)';
@@ -1203,10 +1204,10 @@ export default class CampaignCollector
     return methods.map(method => {
 
       const selectorMap = {
-        class: 'input.' + selector,
-        parentClass: '.' + selector + ' input',
-        dataAttribute: 'input[' + this.#config.fieldDataAttribute + '="' + selector + '"]',
-        name: 'input[name="' + selector + '"]'
+        class: `input.${selector}, textarea.${selector}`,
+        parentClass: `.${selector} input, .${selector} textarea `,
+        dataAttribute: `input[${this.#config.fieldDataAttribute}="${selector}"], textarea[${this.#config.fieldDataAttribute}="${selector}"]`,
+        name: `input[name="${selector}"], textarea[name="${selector}"]`
       };
 
       return selectorMap[method] || selectorMap.name;
@@ -1676,6 +1677,24 @@ export default class CampaignCollector
   #setParams(namespaces = []) 
   {
     const params = this.#url.searchParams;
+
+    if (this.#config.paramMap) {
+     const keys = Array.from(params.keys());
+      
+      for (const key of keys) {
+        if (!this.#config.paramMap.hasOwnProperty(key))
+          continue;
+          
+        const value = params.get(key);
+
+        if (! value)
+          continue;
+
+        params.set(this.#config.paramMap[key], value);
+        params.delete(key);
+      }
+    }
+
     let data = {};
 
     namespaces = namespaces.length > 0 ? namespaces : [this.#config.namespace];
