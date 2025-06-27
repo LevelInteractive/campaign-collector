@@ -204,10 +204,10 @@ Use `.fill()` to manually set form field values from stored campaign data. Accep
 Use `.grab()` to retrieve a JSON object of all stored campaign data. Accepts an `options` object with the following properties:
 
 - `without` (array) - An array of keys to exclude from the returned object. Allowed values: 
-  - `first` - Excludes standard UTM parameters
-  - `last` - Excludes custom parameters
+  - `first` - Excludes last/current session data.
+  - `last` - Excludes first/original session data.
   - `cookies` - Excludes 1st party cookies
   - `globals` - Excludes global variables
 - `applyFilters` (boolean) - If `true`, will apply any defined filters to the returned `cookies` and `globals` objects. Default: `false`.
-- `dereference` (boolean) - If `true`, any `_ref` properties will be expanded. Default: `false`.
-- `asJson` (boolean) - If `true`, returned data will be a JSON string (via `JSON.stringify()`).
+- `dereference` (boolean) - If `true`, any `_ref` properties in the `first` and `last` session touchpoints will be expanded. Default: `false`.
+- `asJson` (boolean) - If `true`, returned data will be a JSON string and not an object literal.
