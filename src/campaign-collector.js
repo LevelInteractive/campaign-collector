@@ -670,6 +670,8 @@ export default class CampaignCollector
           data: properties[key],
         });
         delete properties[key];
+      } else {
+        properties[key] = this.#replaceCommonUnicode(properties[key]);
       }
     });
 
@@ -792,7 +794,7 @@ export default class CampaignCollector
                 return null;
 
               if (value.match(/^[0-9a-fA-F]{64}$/))
-                return [field, value];
+                return [field, (['email', 'phone'].includes(field) ? [value] : value)];
 
               let processedValue = transforms[field] ? transforms[field](value) : value;
 
@@ -1535,6 +1537,22 @@ export default class CampaignCollector
     sanitized = sanitized.slice(0, maxLength);
 
     return sanitized;
+  }
+
+  #replaceCommonUnicode(value)
+  {
+    const replacements = {
+      '\u2013\u2014': '-',   // en dash & em dash → hyphen
+      '\u201C\u201D': '"',   // left & right double quotes → straight quotes  
+      '\u2018\u2019': "'"    // left & right single quotes → straight apostrophe
+    };
+
+    for (const [pattern, replacement] of Object.entries(replacements)) {
+      const regex = new RegExp('[' + pattern + ']', 'g');
+      value = value.replace(regex, replacement);
+    }
+
+    return value;
   }
 
   /**
