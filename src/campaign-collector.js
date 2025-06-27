@@ -1,7 +1,7 @@
 export default class CampaignCollector
 {
   #_libraryName = 'CampaignCollector';
-  #_libraryVersion = '1.2.0';
+  #_libraryVersion = '1.2.1';
 
   #anonymousId;
 
@@ -414,6 +414,13 @@ export default class CampaignCollector
     return this.#checkConsentStatus('analytics_storage') ? this.#anonymousId : this.#redacted;
   }
 
+  #base64Encode(str)
+  {
+    const encoder = new TextEncoder();
+    const bytes = encoder.encode(str);
+    return btoa(String.fromCharCode(...bytes));
+  }
+
   #dataLayerPush(event, data = {})
   {
     dataLayer = window.dataLayer || [];
@@ -670,8 +677,6 @@ export default class CampaignCollector
           data: properties[key],
         });
         delete properties[key];
-      } else {
-        properties[key] = this.#replaceCommonUnicode(properties[key]);
       }
     });
 
@@ -825,16 +830,16 @@ export default class CampaignCollector
       }
 
       const data = JSON.stringify(payload);
-      const queued = navigator.sendBeacon(endpoint, btoa(data));
+      const queued = navigator.sendBeacon(endpoint, this.#base64Encode(data));
 
       if (queued)
         return;
         
-      payload.transport = 'fetch';
+      data = data.replace(`:"${payload.transport}"`, ':"fetch"');
 
       const response = await fetch(endpoint, {
         method: 'POST',
-        body: btoa(data),
+        body: this.#base64Encode(data),
         keepalive: true,
       });
 
@@ -1537,22 +1542,6 @@ export default class CampaignCollector
     sanitized = sanitized.slice(0, maxLength);
 
     return sanitized;
-  }
-
-  #replaceCommonUnicode(value)
-  {
-    const replacements = {
-      '\u2013\u2014': '-',   // en dash & em dash → hyphen
-      '\u201C\u201D': '"',   // left & right double quotes → straight quotes  
-      '\u2018\u2019': "'"    // left & right single quotes → straight apostrophe
-    };
-
-    for (const [pattern, replacement] of Object.entries(replacements)) {
-      const regex = new RegExp('[' + pattern + ']', 'g');
-      value = value.replace(regex, replacement);
-    }
-
-    return value;
   }
 
   /**
