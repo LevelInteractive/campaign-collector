@@ -151,6 +151,7 @@ export default class CampaignCollector
     'device',    // Device
     'matchtype', // Match Type
     'placement', // Placement
+    'affiliate', // Affiliate ID
   ];
 
   /**
@@ -206,7 +207,7 @@ export default class CampaignCollector
    */
   #paramsExpected = {
     utm: ['source', 'medium', 'campaign'],
-    $ns: ['campaign', 'group', 'ad'],
+    $ns: ['campaign'],
   };
 
   #redacted = '(redacted)';
