@@ -1,7 +1,7 @@
 export default class CampaignCollector
 {
   #_libraryName = 'CampaignCollector';
-  #_libraryVersion = '1.2.1';
+  #_libraryVersion = '1.3.0';
 
   #anonymousId;
 
@@ -47,9 +47,8 @@ export default class CampaignCollector
         redacts: []
       },
     },
+    crossDomain: null,
     debug: false,
-    decorateHostnames: [],
-    enableSpaSupport: false,
     fieldMap: {
       anonymous_id: '$ns_anonymous_id',
       attribution: '$ns_attribution_json',
@@ -265,11 +264,14 @@ export default class CampaignCollector
 
     this.#resolveStorageDomain();
 
-    this.#setAnonymousId();
-
     this.#setReferrer();
+
+    this.#resolveLinker();
+
     this.#setParamAllowList();
     this.#setParams(['utm', this.#config.namespace]);
+
+    this.#setAnonymousId();
 
     if (Array.isArray(this.#config.sessionTimeout))
       this.#touchpoints.last.expires = this.#config.sessionTimeout;
@@ -367,6 +369,32 @@ export default class CampaignCollector
         bubbles: true 
       })
     );
+  }
+
+  #resolveLinker()
+  {
+    const linker = `_${this.#config.storageNamespace}_cl`;
+    let data = this.#url.searchParams.get(linker);
+
+    if (!this.#config.crossDomain || !data)
+      return;
+
+    try {
+      data = JSON.parse(atob(data));
+
+      if (typeof data !== 'object' || !data)
+        return;
+
+      for (const [key, value] of Object.entries(data)) {
+        let expires = this.#config.crossDomain.cookies[key] || [90, 'days'];
+        this.#setCookie(key, value, expires);
+      }
+
+      this.#url.searchParams.delete(linker);
+
+      this.#url = new URL(this.#url.href);
+      history.replaceState(null, '', this.#url.href);
+    } catch (e) {}
   }
 
   /**
@@ -901,9 +929,11 @@ export default class CampaignCollector
 
       if (! url.hostname.includes(this.#config.storageDomain)) {
 
+        const crossDomain = this.#config.crossDomain;
+
         // If the clicked link is not on the same domain as the storage domain,
         // we'll decorate the URL with campaign data if it's in the decorateHostnames list.
-        if (! this.#config.decorateHostnames.some(domain => url.hostname.includes(domain) || url.hostname === domain))
+        if (!crossDomain || !crossDomain.hostnames.some(domain => url.hostname.includes(domain) || url.hostname === domain))
           return;
 
         // build a query string using the active session data. 
@@ -916,9 +946,31 @@ export default class CampaignCollector
             url.searchParams.set(key, value);
         }
 
-        // @todo
-        // We should probably append known click IDs from cookies (e.g. _fbc => fbclid) to the URL as well.
-        // Likely don't need it for Google (because Google does this via its conversion linker, but other platforms might).
+        if (this.#config.crossDomain.cookies && typeof this.#config.crossDomain.cookies === 'object') {
+
+          let data = this.grab({
+            without: ['params', 'globals', 'first', 'last']
+          });
+
+          if (data.cookies) {
+
+            Object.keys(data.cookies).forEach((key) => {
+              if (! data.cookies[key])
+                delete data.cookies[key];
+            });
+
+            data.cookies[`_${this.#config.storageNamespace}_anonymous_id`] = data.anonymous_id;
+
+          }
+
+          url.searchParams.set(
+            `_${this.#config.storageNamespace}_cl`, 
+            btoa(
+              JSON.stringify(data.cookies)
+            )
+          );
+
+        }
 
       } else if (this.#config.stripUtmsFromInternalLinks) {
 
@@ -1229,10 +1281,27 @@ export default class CampaignCollector
    * @param {string} name - The name of the cookie to get.
    * @returns {string|null}
    */
-  #getCookie(name)
+  static getCookie(name)
   {
     const match = document.cookie.match(new RegExp('(^| )' + name + '=([^;]+)'));
     return match ? match[2].trim() : null;
+  }
+
+  /**
+   * Gets a cookie value by name.
+   * 
+   * @param {string} name - The name of the cookie to get.
+   * @returns {string|null}
+   */
+  #getCookie(name)
+  {
+    return this.constructor.getCookie(name);
+  }
+
+  #setCookie(name, value, expires)
+  {
+    const [expireValue, expireUnits] = expires;
+    document.cookie = `${name}=${value}; max-age=${this.#getSecondsFor({value: expireValue, units: expireUnits})}; path=/; domain=${this.#config.storageDomain}; secure;`;
   }
 
   #deleteCookie(name)
