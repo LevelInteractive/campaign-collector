@@ -1,7 +1,7 @@
 export default class CampaignCollector
 {
   #_libraryName = 'CampaignCollector';
-  #_libraryVersion = '1.2.1';
+  #_libraryVersion = '1.2.2-alpha';
 
   #anonymousId;
 
@@ -894,10 +894,11 @@ export default class CampaignCollector
     const linkHandler = (e) => {
       const target = e.target.closest('a[href]');
       
-      if (! target) 
+      if (! target || ! target.getAttribute('href').startsWith('http')) 
         return;
 
       const url = new URL(target.href);
+      let decorateHref = false;
 
       if (! url.hostname.includes(this.#config.storageDomain)) {
 
@@ -920,6 +921,8 @@ export default class CampaignCollector
         // We should probably append known click IDs from cookies (e.g. _fbc => fbclid) to the URL as well.
         // Likely don't need it for Google (because Google does this via its conversion linker, but other platforms might).
 
+        decorateHref = true;
+
       } else if (this.#config.stripUtmsFromInternalLinks) {
 
         if (! url.search.includes('utm_'))
@@ -929,9 +932,12 @@ export default class CampaignCollector
           url.searchParams.delete(`utm_${param}`);
         });
 
+        decorateHref = true;
+
       }
 
-      target.href = url.href;
+      if (decorateHref)
+        target.href = url.href;
     };
     
     document.addEventListener('click', linkHandler, true);
