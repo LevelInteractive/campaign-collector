@@ -699,13 +699,15 @@ export default class CampaignCollector
       'date_of_birth',
       'gender',
     ].forEach(field => {
-      if (! userData[field]) 
+      const value = userData[field]?.trim().toLowerCase();
+
+      if (!value)
         return;
 
-      if (! payload.hasOwnProperty('user'))
+      if (!payload.hasOwnProperty('user'))
         payload.user = {};
 
-      payload.user[field] = userData[field].trim().toLowerCase();
+      payload.user[field] = value;
 
       delete userData[field];
     });
