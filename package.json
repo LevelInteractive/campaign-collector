@@ -1,6 +1,6 @@
 {
   "name": "campaign-collector",
-  "version": "1.1.0",
+  "version": "1.2.3",
   "main": "dist/core.min.js",
   "scripts": {
     "build": "webpack --mode production",

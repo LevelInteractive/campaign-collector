@@ -1,7 +1,7 @@
 export default class CampaignCollector
 {
   #_libraryName = 'CampaignCollector';
-  #_libraryVersion = '1.2.3-alpha';
+  #_libraryVersion = '1.2.3';
 
   #anonymousId;
 
@@ -789,7 +789,7 @@ export default class CampaignCollector
             // calculate age
             const MS_PER_YEAR = 1000 * 60 * 60 * 24 * 365.25;
             extracted.age = `${Math.floor((new Date() - date) / MS_PER_YEAR)}`;
-            return date.toISOString().split('T')[0].replace('-', '');
+            return date.toISOString().split('T')[0].replace(/-/g, '');
           },
           gender: (value) => value.substring(0, 1),
         };
@@ -832,7 +832,7 @@ export default class CampaignCollector
 
       }
 
-      const data = JSON.stringify(payload);
+      let data = JSON.stringify(payload);
       const queued = navigator.sendBeacon(endpoint, this.#base64Encode(data));
 
       if (queued)
@@ -1916,7 +1916,7 @@ export default class CampaignCollector
       return;
 
     const checks = [
-      (/[a-z]{2,4}/.test(custom)),
+      (/^[a-z]{2,4}$/.test(custom)),
       (custom !== 'utm'),
     ];
 
